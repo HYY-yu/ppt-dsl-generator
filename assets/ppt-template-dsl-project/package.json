@@ -1,0 +1,32 @@
+{
+  "name": "ppt-template-dsl",
+  "version": "0.3.0",
+  "description": "Template-bound PowerPoint generation from speaker-notes DSL annotations.",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "analyze": "tsx src/analyze-template.ts",
+    "generate": "tsx src/generate-deck.ts",
+    "validate-input": "tsx src/validate-deck-input.ts",
+    "lint-template": "tsx src/lint-template.ts",
+    "qa": "tsx src/qa-deck.ts",
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "demo": "tsx src/demo.ts"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "fast-xml-parser": "^5.2.5",
+    "jszip": "^3.10.1",
+    "pptx-automizer": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}

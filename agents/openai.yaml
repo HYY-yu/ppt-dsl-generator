@@ -1,0 +1,4 @@
+interface:
+  display_name: "PPT DSL Generator"
+  short_description: "Use DSL PPT templates to generate QA-checked decks"
+  default_prompt: "Use $ppt-dsl-generator to turn this document into a PowerPoint using my DSL template."

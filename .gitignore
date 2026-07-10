@@ -1,0 +1,15 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+
+assets/ppt-template-dsl-project/node_modules/
+assets/ppt-template-dsl-project/outputs/
+assets/ppt-template-dsl-project/coverage/
+assets/ppt-template-dsl-project/*.log
+assets/ppt-template-dsl-project/qa_tools/__pycache__/
+
+work/
+tmp/
+qa/
