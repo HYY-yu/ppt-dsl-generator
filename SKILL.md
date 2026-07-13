@@ -1,210 +1,106 @@
 ---
-name: ppt-dsl-generator
-description: 基于演讲者备注中的自定义 DSL 和 PPTX 模板，从用户文档生成 PowerPoint 演示文稿。适用于用户提供或要求使用带 DSL 标记的 PPT 模板、需要将模板解析为可复用 manifest/schema，或需要将 PDF、Word、Markdown、文本等源材料经过模板工作流生成并完成 QA 的 PPTX。
+name: ppt-node-dsl-generator
+description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL 的 PPTX 模板。用于分析节点名中的文本、图片、图标、序号、固定列表和 Group 化变长列表，根据页面备注中的页面类型与逻辑关系生成受约束的大纲、DeckInput 和 PPTX，并以程序性结构校验替代逐页人工视觉 QA。
 ---
 
-# PPT DSL 模板生成器
+# PPT 节点 DSL 生成器
 
-使用本 Skill 执行完整的模板驱动 PPTX 工作流：
-
-1. 将带 DSL 标记的模板 PPTX 解析为可复用的 Node 项目输出。
-2. 从用户资料生成 PPTX 前，必须先取得模板。
-3. 将源资料整理为由用户确认的 PPT 大纲。
-4. 将确认后的大纲转换为受模板约束的 `DeckInput` JSON。
-5. 生成 PPTX，并完成 QA、修复与重试。
-6. 仅在 QA 通过后交付最终 PPTX 与 montage。
+将模板视为经过一次性编译的封闭布局系统。仅修改选择窗格名称中带 DSL 的节点；不要重画页面，不要推测未标记节点的用途。
 
 ## 资源
 
-- `assets/ppt-template-dsl-project/`：可复用的 Node/TypeScript 项目骨架，用 `pptx-automizer` 分析 DSL 模板并生成演示文稿。
-- `references/outline-subagent.md`：从任意资料产出待确认 PPT 大纲的提示词。
-- `references/template-match-subagent.md`：选择模板页并编写 `DeckInput` JSON 的提示词。
-- `references/qa-workflow.md`：主智能体 QA 工作流，涵盖输入语义、包检查、渲染、montage、越界检查、修复和复测。
-- `references/dsl-spec.md`：DSL 语法、图片角色和模板编写规则。
-- `references/asset-plan.md`：生成 `DeckInput` 前的主智能体图片资产规划步骤。
-- `docs/DOCS.md`：面向模板作者的 DSL 教程；`docs/ppt_example.pptx` 提供带备注的可学习示例。
-
-仅在进入相应步骤时读取对应参考资料；除非任务需要完整工作流，否则不要预先加载所有参考资料。
+- `assets/ppt-node-dsl-project/`：Node/TypeScript 编译、校验、生成和验证项目。
+- `examples/模板节点DSL标记指南.md`：指导用户制作自己的节点 DSL 模板；用户未提供合格模板时读取。
+- `examples/ppt_example.pptx`：节点 DSL 标记示例，仅用于学习和测试，不得作为默认模板或写入固定生成流程。
+- `references/node-dsl-spec.md`：节点名、Group 变长列表、备注和继承规则。编译模板或排查 lint 时读取。
+- `references/deck-input.md`：Manifest 到 `DeckInput` 的映射规则。大纲确认后读取。
+- `references/icon-sources.md`：免费 SVG 图标来源、下载与许可记录规则。需要填充图标时读取。
+- `references/programmatic-gates.md`：无需人工视觉 QA 时仍不得绕过的程序 gate。生成和交付时读取。
+- `references/outline-workflow.md`：从用户资料生成并循环确认大纲的职责边界。收到内容资料后读取。
 
 ## 工作流
 
-### 1. 模板接收与解析
+### 1. 编译模板
 
-用户提供带 DSL 备注的 PPTX 模板时，创建或复用一个工作中的 Node 项目：
+要求用户提供待编译的 PPTX 模板。用户尚未标记模板时，指导其复制自己的设计稿并按 `examples/模板节点DSL标记指南.md` 和 `references/node-dsl-spec.md` 完成标记。不得自动使用 examples 中的 PPTX 代替用户输入。
 
-- 若当前工作区已有生成器项目，直接使用。
-- 否则将 `assets/ppt-template-dsl-project/` 复制到任务工作区。
-- 缺少依赖时运行 `npm ci`。
-- 执行模板分析：
+复制或复用 `assets/ppt-node-dsl-project/`，缺少依赖时运行 `npm ci`，然后执行：
 
 ```bash
-npm run analyze -- --template "$TEMPLATE_PPTX" --out "$OUTPUT_DIR"
+npm run compile-template -- --template "$TEMPLATE_PPTX" --out "$COMPILED_DIR"
 ```
 
-预期解析输出：
+编译必须输出：
 
+- `template.pptx`：保留 DSL 名称和备注的编译模板副本。
 - `template-manifest.json`
 - `input.schema.json`
 - `template-lint.json`
+- `template.lock.json`
 
-将 manifest/schema 作为后续大纲映射的稳定契约。生成的 PPTX 不得暴露 DSL 备注。
-将分析失败视为模板编写问题：当模板缺少 DSL 页面类型或必要页面类型覆盖时，分析器必须拒绝输出不可用 manifest。
-准备或排查模板时读取 `references/dsl-spec.md`。模板发生任何变更后必须重新分析；生成阶段会校验 manifest 中的模板 SHA-256 指纹。
+Lint 失败时停止。报告页码、shapeId、节点名和原因；不要修改用户原始模板，不要把无法解析的 DSL 当普通节点跳过。
 
-### 2. 生成请求门禁
+### 2. 大纲确认
 
-用户要求从任意资料生成 PPTX 时：
+读取 `references/outline-workflow.md`，从用户资料生成每页包含页面类型、逻辑关系、标题、要点、视觉需求和来源引用的大纲。持续与用户迭代；确认前不要选择模板页或编写 `DeckInput`。
 
-- 没有带 DSL 标记的 PPTX 模板或已解析的 `template-manifest.json` 时，停止并要求用户先提供模板 PPTX。
-- 已有解析好的模板时，继续生成大纲。
-- 用户提供的是普通、无 DSL 备注的 PPTX 时，说明本 Skill 需要先在演讲者备注中添加 DSL 标注，才能可靠自动化该模板。
+### 3. 选择模板并准备资产
 
-### 3. 大纲确认循环
+根据页面类型、逻辑关系、文本长度、列表项数和组件种类选择 `templateId`。需要图片时准备本地文件；需要图标时读取 `references/icon-sources.md`，下载 SVG 到本地缓存后再引用。不要将远程 URL 直接写入最终输入。
 
-读取 `references/outline-subagent.md`。
+### 4. 生成并校验 DeckInput
 
-用它将用户资料转化为待确认 PPT 大纲。若子智能体工具可用且当前工具策略允许委派，则将该提示词与资料上下文交给工作子智能体；否则由主智能体在本地完成同一职责。
-
-主智能体负责用户交互：
-
-- 展示大纲。
-- 询问用户确认或修改。
-- 持续迭代，直到用户确认大纲可用。
-- 确认前不得选择模板页或编写 `DeckInput`。
-
-确认后的大纲应为每页包含页面类型、标题、核心信息、内容要点、关系提示、视觉提示和来源引用。
-
-### 4. 图片资产规划
-
-选定页面需要内容图片时，读取 `references/asset-plan.md`，并在编写 `DeckInput` 前准备本地资产路径。除非用户明确要求替换，否则保持装饰图和品牌图不变。
-
-### 5. 模板匹配与 DeckInput
-
-读取 `references/template-match-subagent.md`。
-
-使用确认的大纲、`template-manifest.json` 和 `input.schema.json` 生成 `DeckInput` JSON：
-
-```json
-{
-  "title": "演示文稿标题",
-  "slides": [
-    {
-      "templateId": "slide_002",
-      "fields": {},
-      "lists": {},
-      "images": {},
-      "approvedTemplateImages": [],
-      "sourceRefs": []
-    }
-  ]
-}
-```
-
-硬性规则：
-
-- `templateId` 必须存在于 manifest。
-- `fields`、`lists`、图片键和列表项键必须来自所选模板的 manifest。
-- 页面类型必须匹配：封面对应封面、目录对应目录、内容对应内容、过渡对应过渡、结尾对应结尾。
-- 固定长度列表必须精确匹配。
-- DSL 最大值以内的可变列表必须在单页展示；只有生成器确认可安全分页时，才允许更大的原始列表。分页后每页都必须满足 DSL 最小值和最大值。
-- 内容超过模板容量且不支持安全分页时，先拆成多个 `DeckInput` 页面。
-- 编写符合 DSL 长度范围、能放入版面的实质文案；不得机械截断，也不得让说明类字段在视觉上为空。
-- 不得交付模板自带的内容图片。必须使用用户提供资产，或用 `imagegen` Skill 生成特定内容的替换图，再将本地路径写入 `images`。仅当用户明确批准保留某一图片时，才能将该键写入 `approvedTemplateImages`。
-- 避免相邻页面复用同一 `templateId`。在保持页面类型与关系契合的前提下，优先使用更丰富的模板组合。
-
-生成前运行语义校验：
+读取 `references/deck-input.md`。只能使用 Manifest 中存在的节点 key、列表 key 和组件 key：
 
 ```bash
-npm run validate-input -- --manifest "$MANIFEST_JSON" --input "$DECK_INPUT_JSON"
+npm run validate-input -- --manifest "$MANIFEST" --input "$DECK_INPUT"
 ```
 
-生成前修复每个报错。只有生成器可安全拆分列表时，允许出现分页警告。校验器会检查必填绑定、DSL 最小值/最大值、空洞或信息薄弱的说明文本、图片替换或批准、相邻重复模板、列表容量，以及标题中“第五步”等数量词与对应列表长度是否一致。
+修复全部错误后才能生成。文本长度按 Unicode 码点计算；仅列表项中的序号可省略并由生成器按模板格式和 Item 位置自动产生，页面级序号必须显式填写。
 
-### 6. 生成 PPTX
-
-使用选定的 `DeckInput` 运行生成：
+### 5. 生成 PPTX
 
 ```bash
-npm run generate -- --template "$TEMPLATE_PPTX" --manifest "$MANIFEST_JSON" --input "$DECK_INPUT_JSON" --out "$OUTPUT_PPTX"
+npm run generate -- \
+  --template "$COMPILED_DIR/template.pptx" \
+  --manifest "$COMPILED_DIR/template-manifest.json" \
+  --input "$DECK_INPUT" \
+  --out "$OUTPUT_PPTX"
 ```
 
-生成器应当：
+生成器必须：
 
-- 通过 `pptx-automizer` 复用原模板页面。
-- 按 manifest 锚点替换文本。
-- 按 manifest 图片目标替换图片。
-- 扩展、收缩并拆分页支持的列表页。
-- 交付前移除演讲者备注。
-- 清理孤立和悬空关系。
+- 校验模板 SHA-256。
+- 使用原模板页面和母版。
+- 按 shapeId 精确替换普通节点与固定列表节点。
+- 以 Group 为变长列表 Item 边界，删除、复制并在原列表区域均匀布局。
+- 保持 Group 内部组件结构和相对坐标。
+- 将图片写入 PPTX 本地媒体包；SVG 在 macOS 上通过系统 `sips` 转为透明 PNG，缓存中保留 SVG 源文件。
+- 删除备注、悬空关系和孤立关系。
+- 将交付 PPTX 中以 `@` 开头的 DSL 名称清理为普通节点名。
+- 保留编译模板中的 DSL 名称。
 
-生成会再次执行原始输入校验，扩展可安全溢出的列表，改写含数量的续页标题，并在写出 PPTX 前校验展开后的 `DeckInput`。不得绕过生成阶段的校验失败。
+### 6. 程序性验证与交付
 
-若因 `DeckInput` 违反 schema 或 manifest 约束而失败，先修复 `DeckInput`。若因生成器处理 XML/布局错误而失败，修复生成器后重试。
-
-### 7. QA、修复与交付
-
-读取 `references/qa-workflow.md`。
-
-报告成功前必须执行完整 QA。最低检查项：
-
-- 生成的 PPTX 存在且非空。
-- 生成前的 `DeckInput` 语义校验通过。
-- 备注已移除：不存在 `ppt/notesSlides/*`、`ppt/notesMasters/*`、备注关系或备注内容类型覆盖。
-- 已移除孤立关系部件。
-- 已移除悬空的内部关系。
-- 所有页面均可渲染为 PNG。
-- 渲染页数与 PPTX 页数一致。
-- 已生成 montage。
-- 越界检查通过。
-- 不存在空的结构占位符或残留的 PowerPoint 默认占位文本。
-- 每页已完成全尺寸视觉审查：层级、文本适配、遮挡候选、图片裁剪（如有）、模板保真和占位符均有明确结果。
-- 模板自带内容图已替换为用户提供或生成的资产，除非用户明确批准保留该特定资产。
-- 未经明确的续页理由，相邻页不得复用同一模板；含数量的标题必须与可视列表节点数量一致。
-- 封面、目录、动态列表页、图片页和结尾页均通过视觉抽检。
-
-先执行自动 QA；该步骤会生成 `visual-review.template.json`：
+读取 `references/programmatic-gates.md` 并执行：
 
 ```bash
-npm run qa -- \
-  --template "$TEMPLATE_PPTX" \
-  --manifest "$MANIFEST_JSON" \
-  --input "$DECK_INPUT_JSON" \
-  --pptx "$OUTPUT_PPTX" \
-  --out "$QA_OUTPUT_DIR" \
-  --renderer auto
+npm run verify -- --pptx "$OUTPUT_PPTX"
 ```
 
-然后逐页打开全尺寸 PNG。montage 只能用于检查全局节奏，不能代替逐页检查。将模板复制为 `visual-review.json`，为每页填写 `hierarchy`、`textFit`、`overlap`、`templateFidelity`、`placeholders` 和 `imageCrop`（无图片时可填 `na`）；再执行最终 gate：
+只有验证退出码为 0 才能交付。默认不渲染 PNG、不生成 montage、不执行逐页人工视觉 QA。模板开发者要求调试或程序 gate 暴露 PowerPoint 兼容问题时，才额外渲染抽查。
 
-```bash
-npm run qa -- \
-  --template "$TEMPLATE_PPTX" \
-  --manifest "$MANIFEST_JSON" \
-  --input "$DECK_INPUT_JSON" \
-  --pptx "$OUTPUT_PPTX" \
-  --out "$QA_OUTPUT_DIR" \
-  --renderer auto \
-  --visual-review "$QA_OUTPUT_DIR/visual-review.json" \
-  --require-visual-review
-```
+## 硬性边界
 
-只有最终 `qa-report.json` 的 `passed: true` 才能交付；`automatedPassed: true` 只表示机器检查通过。QA 不强制标题单行；审查的是文字是否符合当前模板框和预期层级，必要时缩写文案、换模板或拆页。
-视觉 QA 前安装 `assets/ppt-template-dsl-project/requirements-qa.txt`。`auto` 必须先尝试由 `osascript` 可控制的 macOS Microsoft PowerPoint，并在 `qa-report.json` 记录实际 renderer；只有原生渲染不可用或失败时才回退到内置 LibreOffice/Python 链路。原生保真度为硬要求时使用 `--renderer powerpoint`；需要跳过 PowerPoint 时使用 `--renderer fallback`。不得依赖 Codex 运行时私有路径。
-
-QA 失败时：
-
-- 直接修复可确定的包结构问题。
-- 通过修改模板选择、列表数量或文案长度修复 `DeckInput` 问题。
-- 布局、层级、图片或关系清理存在问题时，修复生成器代码。
-- 重新生成，并重新运行全部 QA 检查。
-- 最多执行三轮完整修复；仍失败时，带证据报告剩余问题。
-
-仅在 QA 通过后才告知用户 PPTX 已完成。回复中提供最终 PPTX 与 montage 链接。
-
-## 实现说明
-
-- 优先保留模板原有形状。除非模板没有可用结构，否则不得从零重画页面。
-- 将 DSL 长度范围视为布局约束，而非建议。
-- 保持 DSL 备注仅供内部使用；最终 PPTX 用户不应看到它们。
-- 动态项目必须保持单项内的相对几何关系。必要时，将生成的项目块追加到 `p:spTree` 的足够靠后位置，确保其位于坐标轴或正文形状之上。
-- 原生 SmartArt、分组 `p:grpSp` 或复杂自由曲线路径等不受支持的结构，应选择更安全的模板或说明限制，不能产出失真的页面。
+- 变长列表必须使用 PowerPoint Group；第一项组名声明范围，例如 `@1@1[3-5]`，后续组名为 `@1@2`、`@1@3`。
+- Group 内组件只标记 `@文本`、`@图片`、`@图标`、`@序号`，不得重复列表前缀。
+- 固定列表可继续使用节点名 `@1@1 文本[4-10]`、`@1@2 文本`。
+- 同一列表不能混用 Group DSL 和固定列表节点 DSL。
+- 生成 Deck 必须包含封面页、目录页、内容页和结尾页；第一张必须是封面页，最后一张必须是结尾页。
+- 目录页必须位于第一张章节过渡页之前，且至少包含 1 个目录项。
+- 所有目录页的列表项总数必须与章节过渡页数量完全一致；章节过渡页序号必须从 1 开始连续递增。
+- 第一项定义列表组件合同，后续项继承长度、序号格式和组件槽位，并且组件结构必须完全一致。
+- 未标记节点不得因内容生成而移动、删除或重画。
+- 模板路径始终来自当前用户输入；不得在代码、命令、默认配置或提示词中硬编码 examples 文件名或任何历史模板路径。
+- 不隐藏异常：解析失败、资源下载失败、关系损坏和输入越界都必须报错。
+- 不增加大型第三方依赖；优先使用项目现有的 JSZip、fast-xml-parser 和 pptx-automizer。

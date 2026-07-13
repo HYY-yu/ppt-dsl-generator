@@ -1,4 +1,4 @@
 interface:
-  display_name: "PPT DSL Generator"
-  short_description: "Use DSL PPT templates to generate QA-checked decks"
-  default_prompt: "Use $ppt-dsl-generator to turn this document into a PowerPoint using my DSL template."
+  display_name: "PPT 节点 DSL 生成器"
+  short_description: "从选择窗格节点 DSL 模板精确生成 PowerPoint"
+  default_prompt: "使用 $ppt-node-dsl-generator 编译这个节点 DSL PPTX 模板，并生成通过程序性校验的演示文稿。"

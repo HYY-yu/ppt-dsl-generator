@@ -1,0 +1,82 @@
+{
+  "title": "PPT 节点 DSL 示例",
+  "slides": [
+    {
+      "templateId": "slide_001",
+      "nodes": {
+        "text_1": "演示团队",
+        "text_2": "节点生成系统",
+        "text_3": "二零二六年七月"
+      },
+      "sourceRefs": ["README.md"]
+    },
+    {
+      "templateId": "slide_003",
+      "lists": {
+        "list_1": [
+          { "text_1": "工作原理" },
+          { "text_1": "核心能力" },
+          { "text_1": "验证交付" }
+        ]
+      }
+    },
+    {
+      "templateId": "slide_005",
+      "nodes": {
+        "text_1": "工作原理",
+        "text_2": "模板经过编译后再填充结构化内容",
+        "number_1": 1
+      }
+    },
+    {
+      "templateId": "slide_006",
+      "nodes": {
+        "text_1": "工作原理"
+      },
+      "lists": {
+        "list_1": [
+          { "text_1": "标记可编辑节点", "text_2": "选择窗格" },
+          { "text_1": "编译模板合同", "text_2": "生成清单" },
+          { "text_1": "校验结构输入", "text_2": "提前拦截" },
+          { "text_1": "输出并做验证", "text_2": "完整闭环" }
+        ]
+      }
+    },
+    {
+      "templateId": "slide_005",
+      "nodes": {
+        "text_1": "核心能力",
+        "text_2": "文本图片图标与列表都由合同约束",
+        "number_1": 2
+      }
+    },
+    {
+      "templateId": "slide_006",
+      "nodes": {
+        "text_1": "核心能力"
+      },
+      "lists": {
+        "list_1": [
+          { "text_1": "保留原始设计", "text_2": "布局不变" },
+          { "text_1": "支持固定列表", "text_2": "字段继承" },
+          { "text_1": "支持变长列表", "text_2": "组合复制" },
+          { "text_1": "内置错误报告", "text_2": "拒绝隐藏" }
+        ]
+      }
+    },
+    {
+      "templateId": "slide_005",
+      "nodes": {
+        "text_1": "验证交付",
+        "text_2": "程序化检查保证输出结构完整可追踪",
+        "number_1": 3
+      }
+    },
+    {
+      "templateId": "slide_025",
+      "nodes": {
+        "text_1": "感谢观看"
+      }
+    }
+  ]
+}

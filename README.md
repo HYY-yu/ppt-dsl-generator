@@ -1,61 +1,169 @@
-# PPT DSL Generator
+# PPT 节点 DSL 生成器
 
-标记好任意 PPTX 模板，就可以让 Codex 帮你根据模板生成 PPT。
+把 PowerPoint 模板变成一个受约束的生成系统：在 PowerPoint 选择窗格中用 DSL 标记可编辑节点，编译出 Manifest，再用结构化 `DeckInput` 精确替换文本、图片、图标、序号和列表。
 
-## 包含内容
+项目同时包含可安装的 Codex Skill 与独立的 Node.js/TypeScript 命令行工具。生成过程保留原模板页面、母版、布局和未标记节点，不重新绘制页面。
 
-- Codex Skill：`SKILL.md`、分阶段提示词和 DSL 参考资料。
-- 独立的 Node/TypeScript 生成器：`assets/ppt-template-dsl-project/`。
-- 输入校验、模板检查、分页、包结构检查和测试。
-- 面向模板作者的说明：[`docs/DOCS.md`](docs/DOCS.md)。
-- 带 DSL 备注的公开学习样例：[`docs/ppt_example.pptx`](docs/ppt_example.pptx)。
-- 不包含用户资料、生成的演示文稿或私有资产。
+## 核心能力
+
+- 编译选择窗格节点名与页面备注中的 DSL。
+- 支持普通文本、图片、图标、序号和固定列表。
+- 支持以 PowerPoint Group 为 Item 边界的变长列表。
+- 生成 `template-manifest.json`、JSON Schema、Lint 报告与模板 SHA-256 锁文件。
+- 生成前校验页面类型、字段、文本长度、列表容量和目录/章节合同。
+- 生成后清理备注、DSL 节点名、悬空关系和孤立关系，并执行程序性验证。
+- 异常不会静默跳过：模板解析、输入越界、资源缺失和关系损坏都会返回非零退出码。
 
 ## 环境要求
 
-- Node.js 20 或更高版本。
-- 按 [`references/dsl-spec.md`](references/dsl-spec.md) 在演讲者备注中标注 DSL 的 PPTX 模板。
-- 完整视觉 QA：Python 3 和 `assets/ppt-template-dsl-project/requirements-qa.txt` 中的依赖。
-- macOS 推荐安装可由 AppleScript 控制的 Microsoft PowerPoint，以取得最高渲染保真度；没有时，后备链路需要 LibreOffice/`soffice` 将 PPTX 导出为 PDF。
+- Node.js 20 或更高版本
+- npm
+- PowerPoint 2019、PowerPoint 2021 或 Microsoft 365（用于制作带 DSL 标记的模板）
+- macOS：使用 SVG 图标时，生成器通过系统自带的 `sips` 转为透明 PNG
 
-## 安装与验证
+项目不要求安装 Microsoft PowerPoint 才能编译、生成或执行程序性验证。
+
+## 仓库结构
+
+```text
+.
+├── SKILL.md                         # Codex Skill 入口
+├── agents/openai.yaml               # Skill 展示信息与默认提示词
+├── assets/ppt-node-dsl-project/     # Node.js/TypeScript 编译与生成工具
+├── examples/
+│   ├── README.md                    # 可运行示例说明
+│   ├── ppt_example.pptx             # 节点 DSL 学习模板
+│   ├── deck-input.example.json      # 与示例模板匹配的输入
+│   └── 模板节点DSL标记指南.md
+└── references/                      # DSL、输入映射与 Gate 规范
+```
+
+## 快速开始
 
 ```bash
-git clone <你的仓库地址> ppt-dsl-generator
-cd ppt-dsl-generator/assets/ppt-template-dsl-project
+git clone https://github.com/HYY-yu/ppt-dsl-generator.git
+cd ppt-dsl-generator/assets/ppt-node-dsl-project
 npm ci
 npm run check
 npm test
-python3 -m pip install -r requirements-qa.txt
 ```
 
-## 基本流程
+编译自己的模板：
 
 ```bash
-export TEMPLATE=/绝对路径/带-dsl-备注的模板.pptx
-export OUT=/绝对路径/输出目录
+TEMPLATE="/绝对路径/your-template.pptx"
+COMPILED_DIR="/绝对路径/compiled-template"
 
-npm run lint-template -- --template "$TEMPLATE" --out "$OUT"
-npm run analyze -- --template "$TEMPLATE" --out "$OUT"
-npm run validate-input -- --manifest "$OUT/template-manifest.json" --input /绝对路径/deck-input.json
-npm run generate -- --template "$TEMPLATE" --manifest "$OUT/template-manifest.json" --input /绝对路径/deck-input.json --out "$OUT/final.pptx"
-npm run qa -- --template "$TEMPLATE" --manifest "$OUT/template-manifest.json" --input /绝对路径/deck-input.json --pptx "$OUT/final.pptx" --out "$OUT/qa" --renderer auto
-# 查看全部渲染页，填写 $OUT/qa/visual-review.json 后执行最终 QA gate
-npm run qa -- --template "$TEMPLATE" --manifest "$OUT/template-manifest.json" --input /绝对路径/deck-input.json --pptx "$OUT/final.pptx" --out "$OUT/qa" --renderer auto --visual-review "$OUT/qa/visual-review.json" --require-visual-review
+npm run compile-template -- \
+  --template "$TEMPLATE" \
+  --out "$COMPILED_DIR"
 ```
 
-模板变更后必须重新运行 `analyze`：manifest 内含模板 SHA-256 指纹，生成器会拒绝使用过期 manifest。
+编译成功后会产生：
 
-`--renderer auto` 会先通过 macOS AppleScript 尝试原生 Microsoft PowerPoint，失败后回退到 LibreOffice。使用 `--renderer powerpoint` 强制原生渲染，使用 `--renderer fallback` 跳过 PowerPoint。`--tools-dir` 仅用于显式指定兼容的自定义渲染工具目录。
+- `template.pptx`
+- `template-manifest.json`
+- `input.schema.json`
+- `template-lint.json`
+- `template.lock.json`
 
-## 作为 Codex Skill 使用
+准备并校验 `DeckInput`：
 
-将本仓库目录复制或链接到 `$CODEX_HOME/skills/ppt-dsl-generator`；如果未设置 `CODEX_HOME`，则放入 `~/.codex/skills/`。随后创建新的 Codex 任务并调用 `$ppt-dsl-generator`。
+```bash
+DECK_INPUT="/绝对路径/deck-input.json"
+
+npm run validate-input -- \
+  --manifest "$COMPILED_DIR/template-manifest.json" \
+  --input "$DECK_INPUT"
+```
+
+生成并验证 PPTX：
+
+```bash
+OUTPUT_PPTX="/绝对路径/output.pptx"
+
+npm run generate -- \
+  --template "$COMPILED_DIR/template.pptx" \
+  --manifest "$COMPILED_DIR/template-manifest.json" \
+  --input "$DECK_INPUT" \
+  --out "$OUTPUT_PPTX"
+
+npm run verify -- --pptx "$OUTPUT_PPTX"
+```
+
+完整的公开示例命令见 [`examples/README.md`](examples/README.md)。`examples/ppt_example.pptx` 仅用于学习和测试；生成实际演示文稿时必须使用你自己的模板路径。
+
+## 节点 DSL 示例
+
+普通节点：
+
+```text
+@文本[4-18]
+@图片-1
+@图标
+@序号-01
+```
+
+固定列表：
+
+```text
+@1@1 文本[4-10]
+@1@1 序号-01
+@1@2 文本
+@1@2 序号
+```
+
+变长列表必须将每个完整 Item 制作为 PowerPoint Group：
+
+```text
+@1@1[3-5]
+@1@2
+@1@3
+```
+
+完整语法见 [`references/node-dsl-spec.md`](references/node-dsl-spec.md)，模板制作步骤见 [`examples/模板节点DSL标记指南.md`](examples/模板节点DSL标记指南.md)。
+
+## 作为 Codex Skill 安装
+
+将仓库克隆到 `$CODEX_HOME/skills/ppt-node-dsl-generator`。未设置 `CODEX_HOME` 时，默认目录为 `~/.codex/skills`：
+
+```bash
+git clone https://github.com/HYY-yu/ppt-dsl-generator.git \
+  ~/.codex/skills/ppt-node-dsl-generator
+```
+
+重新打开 Codex 任务后，使用：
+
+```text
+$ppt-node-dsl-generator
+```
+
+Skill 会按“编译模板 → 确认大纲 → 选择模板页与准备资产 → 校验 DeckInput → 生成 PPTX → 程序性验证”的流程工作。
+
+## 文档导航
+
+- [`SKILL.md`](SKILL.md)：完整工作流和硬性边界
+- [`references/node-dsl-spec.md`](references/node-dsl-spec.md)：节点、列表 Group、页面备注和继承规则
+- [`references/deck-input.md`](references/deck-input.md)：Manifest 到 `DeckInput` 的映射规则
+- [`references/programmatic-gates.md`](references/programmatic-gates.md)：编译、输入和输出 Gate
+- [`references/outline-workflow.md`](references/outline-workflow.md)：大纲生成与确认边界
+- [`references/icon-sources.md`](references/icon-sources.md)：图标来源、缓存与许可记录
+
+## 开发与测试
+
+```bash
+cd assets/ppt-node-dsl-project
+npm ci
+npm run check
+npm test
+```
+
+提交前建议再用公开示例执行一次完整流程，具体命令见 [`examples/README.md`](examples/README.md)。
 
 ## 安全与隐私
 
-仓库刻意排除模板和生成的 PPTX 文件。请将模板和源资料视为潜在敏感内容。本地生成器不会上传它们，但 AI 图片生成或外部渲染器可能适用各自的数据政策，使用前应自行确认。
+工具在本地读取模板、输入和资产，不会主动上传文件。模板和生成内容仍可能包含敏感信息，请在提交或分享前自行检查。图标等第三方素材需遵守各自许可证和商标规则。
 
 ## 许可证
 
-MIT，见 [LICENSE](LICENSE)。第三方 npm 与 Python 依赖仍分别适用其自身许可证。
+本项目使用 [MIT License](LICENSE)。第三方依赖及示例中引用的外部素材仍适用各自许可证。

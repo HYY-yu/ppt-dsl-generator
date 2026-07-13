@@ -1,0 +1,38 @@
+{
+  "name": "ppt-node-dsl-generator",
+  "version": "0.1.0",
+  "description": "编译 PowerPoint 选择窗格节点 DSL 模板并生成受约束的演示文稿。",
+  "license": "MIT",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/HYY-yu/ppt-dsl-generator.git"
+  },
+  "keywords": [
+    "powerpoint",
+    "pptx",
+    "dsl",
+    "codex-skill"
+  ],
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "compile-template": "tsx src/compile-template.ts",
+    "validate-input": "tsx src/validate-input.ts",
+    "generate": "tsx src/generate-deck.ts",
+    "verify": "tsx src/verify-deck.ts",
+    "check": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "commander": "^14.0.0",
+    "fast-xml-parser": "^5.2.5",
+    "jszip": "^3.10.1",
+    "pptx-automizer": "^0.8.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.10",
+    "tsx": "^4.20.3",
+    "typescript": "^5.8.3"
+  }
+}
