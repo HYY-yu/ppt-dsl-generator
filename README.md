@@ -21,7 +21,7 @@
 - PowerPoint 2019、PowerPoint 2021 或 Microsoft 365（用于制作带 DSL 标记的模板）
 - macOS：使用 SVG 图标时，生成器通过系统自带的 `sips` 转为透明 PNG
 
-项目不要求安装 Microsoft PowerPoint 才能编译、生成或执行程序性验证。
+项目不依赖 Microsoft PowerPoint 编译、生成或执行程序性验证。
 
 ## 仓库结构
 
@@ -157,8 +157,6 @@ npm ci
 npm run check
 npm test
 ```
-
-提交前建议再用公开示例执行一次完整流程，具体命令见 [`examples/README.md`](examples/README.md)。
 
 ## 安全与隐私
 
