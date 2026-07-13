@@ -27,6 +27,8 @@ const report = {
   notesParts: packageResult.notesParts,
   danglingRelationships: packageResult.danglingRelationships,
   orphanRelationships: packageResult.orphanRelationships,
+  nativeSvgEmbeddings: packageResult.nativeSvgEmbeddings,
+  invalidSvgEmbeddings: packageResult.invalidSvgEmbeddings,
   unreferencedSlideParts,
   dslLeaks,
   errors,

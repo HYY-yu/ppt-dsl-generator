@@ -19,6 +19,6 @@
 5. 生成前验证 SVG 可解析且非空。
 6. 网络失败时明确报错；不得悄悄保留模板样例图标。
 
-PowerPoint 对只含 SVG relationship 的简化 OOXML 兼容性不稳定。生成器在 macOS 上必须通过 `sips` 将 SVG 栅格化为透明 PNG 后写入媒体包，确保桌面版 PowerPoint 可见；编译模板和本地缓存仍保留原始 SVG。不要使用 Quick Look 缩略图，它会产生不透明白底并保留 SVG 的小尺寸画布。其他运行环境应预先提供透明 PNG，不得写出未经验证的裸 SVG relationship。
+生成器将 SVG 原文件写入 PPTX 媒体包，并使用 Office 2019+ 原生 `asvg:svgBlip` 关系引用。基础 `a:blip` 使用内置透明 PNG 维持 OOXML 图片结构，但不提供旧版 Office 的视觉降级；不得调用 `sips`、Quick Look 或其他操作系统转换器，不得把 SVG 栅格化。交付前必须验证 SVG content type、媒体文件和两条图片关系完整。
 
 许可可能变化。每次从网络获取新图标时重新检查官方来源，不把本文件当永久法律结论。

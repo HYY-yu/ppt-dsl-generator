@@ -1,7 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-import { tmpdir } from "node:os";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Automizer } from "pptx-automizer";
 import type { ISlide } from "pptx-automizer";
@@ -14,7 +11,12 @@ import { readPptx } from "./read.js";
 import { ownerPartForRelationshipPart, parsePresentationSlideRelIds, parseRelationships, relationshipPartForOwner, resolveRelationshipTarget } from "./relationships.js";
 
 const TEMPLATE_LABEL = "node_dsl_template";
-const execFileAsync = promisify(execFile);
+const SVG_EXTENSION_URI = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}";
+const SVG_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2016/SVG/main";
+const TRANSPARENT_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
 
 export async function generateDeck(options: { templatePath: string; manifest: TemplateManifest; input: DeckInput; outPath: string }): Promise<void> {
   await assertManifestMatchesTemplate(options.manifest, options.templatePath);
@@ -180,9 +182,25 @@ async function patchComponentNode(
     return replaceNodeRaw(xml, node, replaceTextInNode(node.raw, text));
   }
   const sourcePath = typeof value === "object" ? value.path : String(value);
-  const relId = node.relId ?? await addImageRelationship(zip, slidePath, sourcePath, nextMedia());
-  if (node.relId) await retargetImageRelationship(zip, slidePath, relId, sourcePath, nextMedia());
-  const replacement = node.relId ? node.raw : pictureXml(node, relId);
+  const serial = nextMedia();
+  if (path.extname(sourcePath).toLowerCase() === ".svg") {
+    const fallbackMedia = await addMediaBuffer(zip, TRANSPARENT_PNG, ".png", `node-dsl-${serial}-fallback.png`);
+    const svgMedia = await addMediaBuffer(zip, await readFile(sourcePath), ".svg", `node-dsl-${serial}.svg`);
+    const fallbackRelId = node.relId ?? await addImageRelationship(zip, slidePath, fallbackMedia);
+    if (node.relId) await retargetImageRelationship(zip, slidePath, fallbackRelId, fallbackMedia);
+    const existingSvgRelId = nativeSvgRelationshipId(node.raw);
+    const svgRelId = existingSvgRelId ?? await addImageRelationship(zip, slidePath, svgMedia);
+    if (existingSvgRelId) await retargetImageRelationship(zip, slidePath, existingSvgRelId, svgMedia);
+    console.info(`[generate:svg] mode=native-office2019 source=${path.basename(sourcePath)} media=${svgMedia}`);
+    const picture = node.relId ? node.raw : pictureXml(node, fallbackRelId);
+    return replaceNodeRaw(xml, node, embedNativeSvgInPictureXml(picture, fallbackRelId, svgRelId));
+  }
+  const mediaName = await addMedia(zip, sourcePath, serial);
+  const relId = node.relId ?? await addImageRelationship(zip, slidePath, mediaName);
+  if (node.relId) await retargetImageRelationship(zip, slidePath, relId, mediaName);
+  const existingSvgRelId = nativeSvgRelationshipId(node.raw);
+  if (existingSvgRelId) await removeImageRelationship(zip, slidePath, existingSvgRelId);
+  const replacement = removeNativeSvgFromPictureXml(node.relId ? node.raw : pictureXml(node, relId));
   return replaceNodeRaw(xml, node, replacement);
 }
 
@@ -192,24 +210,22 @@ function formatNumber(value: NodeValue, width = 1): string {
   return Number.isFinite(numeric) ? String(numeric).padStart(width, "0") : raw;
 }
 
-async function addImageRelationship(zip: Awaited<ReturnType<typeof readPptx>>, slidePath: string, sourcePath: string, serial: number): Promise<string> {
+async function addImageRelationship(zip: Awaited<ReturnType<typeof readPptx>>, slidePath: string, mediaName: string): Promise<string> {
   const relPath = relationshipPartForOwner(slidePath);
   const relFile = zip.file(relPath);
   if (!relFile) throw new Error(`${slidePath} 缺少 relationships`);
   let relXml = await relFile.async("string");
   const ids = [...relXml.matchAll(/\bId="rId(\d+)"/g)].map((match) => Number(match[1]));
   const relId = `rId${Math.max(0, ...ids) + 1}`;
-  const mediaName = await addMedia(zip, sourcePath, serial);
   relXml = relXml.replace("</Relationships>", `<Relationship Id="${relId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/${mediaName}"/></Relationships>`);
   zip.file(relPath, relXml);
   return relId;
 }
 
-async function retargetImageRelationship(zip: Awaited<ReturnType<typeof readPptx>>, slidePath: string, relId: string, sourcePath: string, serial: number): Promise<void> {
+async function retargetImageRelationship(zip: Awaited<ReturnType<typeof readPptx>>, slidePath: string, relId: string, mediaName: string): Promise<void> {
   const relPath = relationshipPartForOwner(slidePath);
   const file = zip.file(relPath);
   if (!file) throw new Error(`${slidePath} 缺少 relationships`);
-  const mediaName = await addMedia(zip, sourcePath, serial);
   const xml = await file.async("string");
   const updated = xml.replace(/<Relationship\b[^>]*\/>/g, (relationship) => {
     if (!new RegExp(`\\bId="${escapeRegExp(relId)}"`).test(relationship)) return relationship;
@@ -219,34 +235,34 @@ async function retargetImageRelationship(zip: Awaited<ReturnType<typeof readPptx
   zip.file(relPath, updated);
 }
 
+async function removeImageRelationship(zip: Awaited<ReturnType<typeof readPptx>>, slidePath: string, relId: string): Promise<void> {
+  const relPath = relationshipPartForOwner(slidePath);
+  const file = zip.file(relPath);
+  if (!file) throw new Error(`${slidePath} 缺少 relationships`);
+  const xml = await file.async("string");
+  zip.file(relPath, xml.replace(/<Relationship\b[^>]*\/>/g, (relationship) => (
+    new RegExp(`\\bId="${escapeRegExp(relId)}"`).test(relationship) ? "" : relationship
+  )));
+}
+
 async function addMedia(zip: Awaited<ReturnType<typeof readPptx>>, sourcePath: string, serial: number): Promise<string> {
-  const asset = await readPowerPointAsset(sourcePath);
-  const extension = asset.extension;
-  const name = `node-dsl-${serial}${extension}`;
-  zip.file(`ppt/media/${name}`, asset.buffer);
+  const extension = path.extname(sourcePath).toLowerCase();
+  return addMediaBuffer(zip, await readFile(sourcePath), extension, `node-dsl-${serial}${extension}`);
+}
+
+async function addMediaBuffer(
+  zip: Awaited<ReturnType<typeof readPptx>>,
+  buffer: Buffer,
+  extension: string,
+  name: string,
+): Promise<string> {
+  zip.file(`ppt/media/${name}`, buffer);
   await ensureContentType(zip, extension);
   return name;
 }
 
-async function readPowerPointAsset(sourcePath: string): Promise<{ buffer: Buffer; extension: string }> {
-  const extension = path.extname(sourcePath).toLowerCase();
-  if (extension !== ".svg") return { buffer: await readFile(sourcePath), extension };
-  const directory = await mkdtemp(path.join(tmpdir(), "ppt-node-dsl-svg-"));
-  try {
-    if (process.platform !== "darwin") {
-      throw new Error("SVG 图标需要先转换为透明 PNG；当前运行环境未提供 macOS sips 转换器");
-    }
-    const outputPath = path.join(directory, `${path.basename(sourcePath, ".svg")}.png`);
-    await execFileAsync("/usr/bin/sips", ["-s", "format", "png", sourcePath, "--out", outputPath]);
-    console.info(`[generate] SVG rasterized for PowerPoint compatibility: ${path.basename(sourcePath)}`);
-    return { buffer: await readFile(outputPath), extension: ".png" };
-  } finally {
-    await rm(directory, { recursive: true, force: true });
-  }
-}
-
 async function ensureContentType(zip: Awaited<ReturnType<typeof readPptx>>, extension: string): Promise<void> {
-  const mime = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif" } as Record<string, string>)[extension];
+  const mime = ({ ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".svg": "image/svg+xml" } as Record<string, string>)[extension];
   if (!mime) throw new Error(`不支持图片格式: ${extension}`);
   const file = zip.file("[Content_Types].xml");
   if (!file) return;
@@ -254,6 +270,32 @@ async function ensureContentType(zip: Awaited<ReturnType<typeof readPptx>>, exte
   const ext = extension.slice(1);
   if (new RegExp(`<Default\\b[^>]*Extension="${escapeRegExp(ext)}"`, "i").test(xml)) return;
   zip.file("[Content_Types].xml", xml.replace("</Types>", `<Default Extension="${ext}" ContentType="${mime}"/></Types>`));
+}
+
+function nativeSvgRelationshipId(raw: string): string | undefined {
+  return raw.match(/<asvg:svgBlip\b[^>]*\br:embed="([^"]+)"/)?.[1];
+}
+
+export function embedNativeSvgInPictureXml(raw: string, fallbackRelId: string, svgRelId: string): string {
+  const extension = `<a:ext uri="${SVG_EXTENSION_URI}"><asvg:svgBlip xmlns:asvg="${SVG_NAMESPACE}" r:embed="${svgRelId}"/></a:ext>`;
+  return raw.replace(/<a:blip\b[^>]*(?:\/>|>[\s\S]*?<\/a:blip>)/, (original) => {
+    let blip = original.replace(/(<a:blip\b[^>]*\br:embed=")[^"]+("?)/, `$1${fallbackRelId}$2`);
+    if (!/\br:embed="/.test(blip.match(/^<a:blip\b[^>]*>/)?.[0] ?? blip)) {
+      blip = blip.replace(/^<a:blip\b/, `<a:blip r:embed="${fallbackRelId}"`);
+    }
+    if (/<asvg:svgBlip\b/.test(blip)) {
+      return blip.replace(/(<asvg:svgBlip\b[^>]*\br:embed=")[^"]+("?)/, `$1${svgRelId}$2`);
+    }
+    if (/\/>$/.test(blip)) return `${blip.slice(0, -2)}><a:extLst>${extension}</a:extLst></a:blip>`;
+    if (/<a:extLst\b/.test(blip)) return blip.replace("</a:extLst>", `${extension}</a:extLst>`);
+    return blip.replace("</a:blip>", `<a:extLst>${extension}</a:extLst></a:blip>`);
+  });
+}
+
+export function removeNativeSvgFromPictureXml(raw: string): string {
+  return raw.replace(/<a:blip\b[^>]*(?:\/>|>[\s\S]*?<\/a:blip>)/, (original) => original
+    .replace(/<a:ext\b[^>]*>(?:(?!<\/a:ext>)[\s\S])*?<asvg:svgBlip\b[^>]*\/>(?:(?!<\/a:ext>)[\s\S])*?<\/a:ext>/g, "")
+    .replace(/<a:extLst\b[^>]*>\s*<\/a:extLst>/g, ""));
 }
 
 function pictureXml(node: XmlNode, relId: string): string {

@@ -19,9 +19,11 @@
 - Node.js 20 或更高版本
 - npm
 - PowerPoint 2019、PowerPoint 2021 或 Microsoft 365（用于制作带 DSL 标记的模板）
-- macOS：使用 SVG 图标时，生成器通过系统自带的 `sips` 转为透明 PNG
+- SVG 使用 Office 2019+ 原生 `asvg:svgBlip` 写入 PPTX，不进行栅格化
 
 项目不依赖 Microsoft PowerPoint 编译、生成或执行程序性验证。
+
+原生 SVG 输出仅支持 PowerPoint 2019 及以上版本，不为旧版 Office 生成兼容图像。
 
 ## 仓库结构
 

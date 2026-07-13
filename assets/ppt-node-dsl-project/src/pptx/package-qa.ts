@@ -14,6 +14,8 @@ export interface PackageQaResult {
   orphanRelationships: string[];
   danglingRelationships: string[];
   missingImageRelationships: string[];
+  nativeSvgEmbeddings: number;
+  invalidSvgEmbeddings: string[];
   emptyPlaceholders: string[];
   placeholderSampleTexts: string[];
   errors: string[];
@@ -26,6 +28,8 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
   const orphanRelationships: string[] = [];
   const danglingRelationships: string[] = [];
   const missingImageRelationships: string[] = [];
+  const invalidSvgEmbeddings: string[] = [];
+  let nativeSvgEmbeddings = 0;
   const emptyPlaceholders: string[] = [];
   const placeholderSampleTexts: string[] = [];
   const allPaths = Object.keys(zip.files);
@@ -33,6 +37,10 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
 
   const contentTypes = await maybeReadZipText(zip, "[Content_Types].xml");
   if (/notesSlides|notesMasters/.test(contentTypes ?? "")) errors.push("[Content_Types].xml still references notes parts");
+  const svgMediaPaths = allPaths.filter((name) => /^ppt\/media\/.*\.svg$/i.test(name));
+  if (svgMediaPaths.length && !/<Default\b(?=[^>]*\bExtension="svg")(?=[^>]*\bContentType="image\/svg\+xml")[^>]*\/>/i.test(contentTypes ?? "")) {
+    invalidSvgEmbeddings.push("[Content_Types].xml missing image/svg+xml registration");
+  }
   const presentationXml = await readZipText(zip, "ppt/presentation.xml");
   if (/<p:notesMasterIdLst\b/.test(presentationXml)) errors.push("presentation.xml still contains p:notesMasterIdLst");
 
@@ -71,12 +79,37 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
       const target = resolveRelationshipTarget(slidePath, relationship.target);
       if (!zip.file(target)) missingImageRelationships.push(`${slidePath}: ${relId} -> ${relationship.target}`);
     }
+    for (const match of slideXml.matchAll(/<a:blip\b[^>]*>[\s\S]*?<asvg:svgBlip\b[^>]*r:embed="([^"]+)"[^>]*\/>[\s\S]*?<\/a:blip>/g)) {
+      nativeSvgEmbeddings += 1;
+      const block = match[0];
+      const svgRelId = match[1];
+      const fallbackRelId = block.match(/^<a:blip\b[^>]*r:embed="([^"]+)"/)?.[1];
+      const svgRelationship = relationships.get(svgRelId);
+      const fallbackRelationship = fallbackRelId ? relationships.get(fallbackRelId) : undefined;
+      if (!svgRelationship) {
+        invalidSvgEmbeddings.push(`${slidePath}: missing SVG relationship ${svgRelId}`);
+      } else {
+        const svgTarget = resolveRelationshipTarget(slidePath, svgRelationship.target);
+        if (!svgTarget.toLowerCase().endsWith(".svg") || !zip.file(svgTarget)) {
+          invalidSvgEmbeddings.push(`${slidePath}: invalid SVG target ${svgRelId} -> ${svgRelationship.target}`);
+        }
+      }
+      if (!fallbackRelationship) {
+        invalidSvgEmbeddings.push(`${slidePath}: missing SVG fallback relationship ${fallbackRelId ?? "(none)"}`);
+      } else {
+        const fallbackTarget = resolveRelationshipTarget(slidePath, fallbackRelationship.target);
+        if (!fallbackTarget.toLowerCase().endsWith(".png") || !zip.file(fallbackTarget)) {
+          invalidSvgEmbeddings.push(`${slidePath}: invalid SVG fallback ${fallbackRelId} -> ${fallbackRelationship.target}`);
+        }
+      }
+    }
   }
 
   if (notesPaths.length) errors.push(`notes parts remain: ${notesPaths.length}`);
   if (orphanRelationships.length) errors.push(`orphan relationship parts: ${orphanRelationships.length}`);
   if (danglingRelationships.length) errors.push(`dangling internal relationships: ${danglingRelationships.length}`);
   if (missingImageRelationships.length) errors.push(`missing image relationships: ${missingImageRelationships.length}`);
+  if (invalidSvgEmbeddings.length) errors.push(`invalid native SVG embeddings: ${invalidSvgEmbeddings.length}`);
   if (emptyPlaceholders.length) errors.push(`empty structural placeholders: ${emptyPlaceholders.length}`);
   if (placeholderSampleTexts.length) errors.push(`placeholder sample text remains: ${placeholderSampleTexts.length}`);
 
@@ -87,6 +120,8 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
     orphanRelationships,
     danglingRelationships,
     missingImageRelationships,
+    nativeSvgEmbeddings,
+    invalidSvgEmbeddings,
     emptyPlaceholders,
     placeholderSampleTexts,
     errors,
