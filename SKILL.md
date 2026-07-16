@@ -14,6 +14,7 @@ description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL
 - `examples/ppt_example.pptx`：节点 DSL 标记示例，仅用于学习和测试，不得作为默认模板或写入固定生成流程。
 - `references/node-dsl-spec.md`：节点名、Group 变长列表、备注和继承规则。编译模板或排查 lint 时读取。
 - `references/deck-input.md`：Manifest 到 `DeckInput` 的映射规则。大纲确认后读取。
+- `references/image-generation.md`：AI 生图数量、风格、提示词和图片框填充规则。需要补充或生成图片时读取。
 - `references/icon-sources.md`：免费 SVG 图标来源、下载与许可记录规则。需要填充图标时读取。
 - `references/programmatic-gates.md`：无需人工视觉 QA 时仍不得绕过的程序 gate。生成和交付时读取。
 - `references/outline-workflow.md`：从用户资料生成并循环确认大纲的职责边界。收到内容资料后读取。
@@ -46,7 +47,7 @@ Lint 失败时停止。报告页码、shapeId、节点名和原因；不要修�
 
 ### 3. 选择模板并准备资产
 
-根据页面类型、逻辑关系、文本长度、列表项数和组件种类选择 `templateId`。需要图片时准备本地文件；需要图标时读取 `references/icon-sources.md`，下载 SVG 到本地缓存后再引用。不要将远程 URL 直接写入最终输入。
+根据页面类型、逻辑关系、文本长度、列表项数和组件种类选择 `templateId`。需要补充 AI 图片时先读取 `references/image-generation.md`；需要图标时读取 `references/icon-sources.md`。所有图片和 SVG 都先落到本地缓存再引用，不要将远程 URL 直接写入最终输入。
 
 ### 4. 生成并校验 DeckInput
 
@@ -56,7 +57,7 @@ Lint 失败时停止。报告页码、shapeId、节点名和原因；不要修�
 npm run validate-input -- --manifest "$MANIFEST" --input "$DECK_INPUT"
 ```
 
-修复全部错误后才能生成。文本长度按 Unicode 码点计算；仅列表项中的序号可省略并由生成器按模板格式和 Item 位置自动产生，页面级序号必须显式填写。
+修复全部错误后才能生成。文本长度按可见 Unicode 码点计算，折叠重复空白并拒绝零宽字符、格式控制字符和非标准空白；禁止以不可见字符凑字数。若生成端为文本范围增加安全内缩，`maxLength <= 10` 的短文本必须保留模板原始范围，禁止应用百分比内缩。短标题与目录项必须在长度范围内自然改写为完整词语或短语，禁止机械截尾。动态列表后续项继承第一项的模板合同，不得根据第一项实际生成值的长度收窄合同。仅列表项中的序号可省略并由生成器按模板格式和 Item 位置自动产生，页面级序号必须显式填写。
 
 ### 5. 生成 PPTX
 
@@ -75,8 +76,15 @@ npm run generate -- \
 - 按 shapeId 精确替换普通节点与固定列表节点。
 - 以 Group 为变长列表 Item 边界，删除、复制并在原列表区域均匀布局。
 - 保持 Group 内部组件结构和相对坐标。
-- 将图片写入 PPTX 本地媒体包；SVG 以 Office 2019+ 原生 `asvg:svgBlip` 写入，不栅格化、不依赖操作系统转换器。
-- 删除备注、悬空关系和孤立关系。
+- 将模板中每个 Group 的外层几何视为布局合同：Item 数不变时完整保留原始框；Item 数变化且存在交错模式时，只沿主轴重新分布，并继承模板的副轴位置、尺寸和周期。
+- 同一固定或变长列表的每个 `icon_n` 以第一项同名图标槽位为标准，取第一项宽高较短边作为统一边长，将后续图标框改为相同正方形并保持各自中心点不变。
+- 光栅图片按真实宽高居中裁剪填充目标图片框：保持模板图片框的位置、尺寸和形状，不拉伸、不留白；宽图对称裁左右，长图对称裁上下。
+- 将图片写入 PPTX 本地媒体包；SVG 以 Office 2019+ 原生 `asvg:svgBlip` 单 SVG 关系写入，不添加透明 PNG fallback、不栅格化、不依赖操作系统转换器。将 SVG 的 `currentColor` 物化为显式颜色：图标中心下方可确认是白色或近白色填充时使用深灰 `#404040`，其他背景或无法确认时使用白色 `#FFFFFF`。
+- 每个被替换的图片或 icon 节点创建独立 image relationship，不复用或重定向模板已有的共享 `rId`；整页替换完成后统一清理未引用图片关系。
+- 删除备注、悬空关系、孤立关系，以及 `ppt/_rels/presentation.xml.rels` 中 Office 不允许的 `Presentation -> SlideLayout` 显式关系。
+- 将 Automizer 产生的 `rId*-created` 等非规范 relationship ID 改写为纯数字 `rIdN`，并同步更新 owner XML 中的引用。
+- 若动态列表或节点替换删除了动画所引用的形状，只裁剪全部目标都已消失的动画分支并保留同页其余有效动画；只有无法安全局部修复或已无有效目标时才移除整页 `<p:timing>`。
+- 模板页或 Group 被复用时，为重复的 slide `p14:creationId` 和 shape `a16:creationId` 重新分配唯一值。
 - 将交付 PPTX 中以 `@` 开头的 DSL 名称清理为普通节点名。
 - 保留编译模板中的 DSL 名称。
 
@@ -100,8 +108,18 @@ npm run verify -- --pptx "$OUTPUT_PPTX"
 - 目录页必须位于第一张章节过渡页之前，且至少包含 1 个目录项。
 - 所有目录页的列表项总数必须与章节过渡页数量完全一致；章节过渡页序号必须从 1 开始连续递增。
 - 第一项定义列表组件合同，后续项继承长度、序号格式和组件槽位，并且组件结构必须完全一致。
+- 第一项的实际填充值不参与合同推导；`@文本[2-4]` 必须始终允许后续项填写 2-4 字。最大长度不超过 10 的文本范围不得做百分比内缩。
+- 变长列表 Group 的外层位置和尺寸属于模板语义；时间轴、阶梯、蛇形等交错布局不得被强制压成单行或单列。
+- 同一列表的 `icon_n` 必须继承第一项同名图标槽位的较短边，最终图标框为相同正方形且中心点不变。
+- 同一 Deck 的 AI 生图限制为 1-3 张且只使用一种已支持风格；图片统一为 1:1 正方形，主体和关键元素位于中央安全区，纯装饰、无文字，并由 Runtime 居中裁剪填充模板图片框。
 - 未标记节点不得因内容生成而移动、删除或重画。
 - 模板路径始终来自当前用户输入；不得在代码、命令、默认配置或提示词中硬编码 examples 文件名或任何历史模板路径。
 - 原生 SVG 输出只面向 PowerPoint 2019 及以上版本；不为旧版 Office 执行栅格化兼容处理。
+- `ppt/presentation.xml` 不得直接关联 SlideLayout；页面布局必须经由 SlideMaster/Slide 的合法关系引用。
+- 所有 relationship ID 必须匹配 `^rId\d+$`；PowerPoint 会将 `rId*-created` 视为需修复的包。
+- 图片或 icon 节点替换不得重定向共享 relationship；最终 slide relationships 中不得残留未被同页 XML 引用的 image relationship。
+- 所有动画目标 `spid` 必须能在同页 `p:cNvPr/@id` 中找到；悬空引用必须在生成阶段清理。
+- 要求每个动态列表 Item 都有动画时，模板必须预制到声明的最大 Group 数并逐组配置动画；生成器新复制出的超出预制数量的 Group 不会自动继承 PowerPoint 动画。
+- slide `p14:creationId` 和 shape `a16:creationId` 在整份输出 Deck 中不得重复。
 - 不隐藏异常：解析失败、资源下载失败、关系损坏和输入越界都必须报错。
 - 不增加大型第三方依赖；优先使用项目现有的 JSZip、fast-xml-parser 和 pptx-automizer。

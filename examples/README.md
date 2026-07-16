@@ -51,9 +51,11 @@ npm run verify -- --pptx "$OUT_DIR/example.generated.pptx"
 - 章节序号从 1 连续递增。
 - 固定列表字段与文本长度校验。
 - PPTX 生成、备注清理、DSL 名称清理和包关系验证。
+- relationship ID、图片关系、动画目标和 creationId 的程序性 Gate。
 
 变长列表、图片和图标的语法与资产规则请继续阅读：
 
 - [`../references/node-dsl-spec.md`](../references/node-dsl-spec.md)
 - [`../references/deck-input.md`](../references/deck-input.md)
+- [`../references/image-generation.md`](../references/image-generation.md)
 - [`../references/icon-sources.md`](../references/icon-sources.md)

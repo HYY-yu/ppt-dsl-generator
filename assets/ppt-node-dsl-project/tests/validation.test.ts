@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ComponentManifest, DeckInput, SlideManifest, TemplateManifest } from "../src/types.js";
-import { validateDeckInput } from "../src/validation.js";
+import { meaningfulTextLength, validateDeckInput } from "../src/validation.js";
 
 const locator = { shapeId: "1", shapeName: "@文本[2-4]", nodeType: "sp" as const, path: [0] };
 const text: ComponentManifest = { key: "text_1", kind: "text", ordinal: 1, rawDsl: "@文本[2-4]", sampleContent: "章节", length: { min: 2, max: 4, fixed: false }, locator };
@@ -77,4 +77,20 @@ test("requires directory before the first transition", async () => {
   };
   const errors = await validateDeckInput(completeManifest, input);
   assert.ok(errors.includes("目录页必须位于第一张章节过渡页之前"));
+});
+
+test("rejects invisible Unicode padding in text fields", async () => {
+  const input: DeckInput = {
+    slides: [
+      { templateId: "directory", lists: { list_1: [{ text_1: "章节\u200b\u200d" }] } },
+      { templateId: "transition", nodes: { text_1: "章节", number_1: 1 } },
+    ],
+  };
+  const errors = await validateDeckInput(manifest, input);
+  assert.ok(errors.some((error) => error.includes("包含不可见格式字符")));
+});
+
+test("meaningful text length collapses repeated whitespace", () => {
+  assert.deepEqual(meaningfulTextLength("  alpha     beta  "), { length: 10, hasInvalidCharacters: false });
+  assert.deepEqual(meaningfulTextLength("内容\u205f\u205f"), { length: 2, hasInvalidCharacters: true });
 });

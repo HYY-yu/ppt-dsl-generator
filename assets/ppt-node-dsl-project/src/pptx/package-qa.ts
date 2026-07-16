@@ -6,6 +6,7 @@ import {
   parseRelationships,
   resolveRelationshipTarget,
 } from "./relationships.js";
+import { findDanglingAnimationShapeIds } from "./animation.js";
 
 export interface PackageQaResult {
   slideCount: number;
@@ -13,6 +14,12 @@ export interface PackageQaResult {
   notesParts: number;
   orphanRelationships: string[];
   danglingRelationships: string[];
+  invalidPresentationRelationships: string[];
+  nonCanonicalRelationshipIds: string[];
+  duplicateSlideCreationIds: string[];
+  duplicateShapeCreationIds: string[];
+  invalidAnimationTargets: string[];
+  unreferencedImageRelationships: string[];
   missingImageRelationships: string[];
   nativeSvgEmbeddings: number;
   invalidSvgEmbeddings: string[];
@@ -27,6 +34,12 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
   const warnings: string[] = [];
   const orphanRelationships: string[] = [];
   const danglingRelationships: string[] = [];
+  const invalidPresentationRelationships: string[] = [];
+  const nonCanonicalRelationshipIds: string[] = [];
+  const duplicateSlideCreationIds: string[] = [];
+  const duplicateShapeCreationIds: string[] = [];
+  const invalidAnimationTargets: string[] = [];
+  const unreferencedImageRelationships: string[] = [];
   const missingImageRelationships: string[] = [];
   const invalidSvgEmbeddings: string[] = [];
   let nativeSvgEmbeddings = 0;
@@ -53,8 +66,14 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
     const relsXml = await maybeReadZipText(zip, relsPath);
     if (!relsXml) continue;
     for (const relationship of parseRelationships(relsXml)) {
+      if (!/^rId\d+$/.test(relationship.id)) {
+        nonCanonicalRelationshipIds.push(`${relsPath}: ${relationship.id}`);
+      }
       if (relationship.type.endsWith("/notesSlide") || relationship.type.endsWith("/notesMaster")) {
         errors.push(`${relsPath} still contains notes relationship ${relationship.id}`);
+      }
+      if (ownerPart === "ppt/presentation.xml" && relationship.type.endsWith("/slideLayout")) {
+        invalidPresentationRelationships.push(`${relsPath}: ${relationship.id} -> ${relationship.target}`);
       }
       if (relationship.targetMode === "External") continue;
       const target = resolveRelationshipTarget(ownerPart, relationship.target);
@@ -63,12 +82,38 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
   }
 
   const slidePaths = await readOrderedSlidePaths(zip);
+  const seenSlideCreationIds = new Map<string, string>();
+  const seenShapeCreationIds = new Map<string, string>();
   for (const slidePath of slidePaths) {
     const slideXml = await readZipText(zip, slidePath);
+    for (const match of slideXml.matchAll(/<p14:creationId\b[^>]*\bval="(\d+)"[^>]*\/>/g)) {
+      const id = match[1];
+      const firstSlide = seenSlideCreationIds.get(id);
+      if (firstSlide) duplicateSlideCreationIds.push(`${slidePath}: ${id} (first seen in ${firstSlide})`);
+      else seenSlideCreationIds.set(id, slidePath);
+    }
+    for (const match of slideXml.matchAll(/<a16:creationId\b[^>]*\bid="([^"]+)"[^>]*\/>/g)) {
+      const id = match[1].toUpperCase();
+      const firstSlide = seenShapeCreationIds.get(id);
+      if (firstSlide) duplicateShapeCreationIds.push(`${slidePath}: ${id} (first seen in ${firstSlide})`);
+      else seenShapeCreationIds.set(id, slidePath);
+    }
+    for (const shapeId of findDanglingAnimationShapeIds(slideXml)) {
+      invalidAnimationTargets.push(`${slidePath}: spid=${shapeId}`);
+    }
     inspectSlidePlaceholders(slidePath, slideXml, emptyPlaceholders, placeholderSampleTexts);
     const relsPath = `${slidePath.slice(0, slidePath.lastIndexOf("/") + 1)}_rels/${slidePath.slice(slidePath.lastIndexOf("/") + 1)}.rels`;
     const relsXml = await maybeReadZipText(zip, relsPath);
     const relationships = new Map((relsXml ? parseRelationships(relsXml) : []).map((relationship) => [relationship.id, relationship]));
+    const referencedRelationshipIds = new Set(Array.from(
+      slideXml.matchAll(/\b(?:r:id|r:embed|r:link|r:href|o:relid)="([^"]+)"/g),
+      (match) => match[1],
+    ));
+    for (const relationship of relationships.values()) {
+      if (relationship.type.endsWith("/image") && !referencedRelationshipIds.has(relationship.id)) {
+        unreferencedImageRelationships.push(`${slidePath}: ${relationship.id} -> ${relationship.target}`);
+      }
+    }
     for (const match of slideXml.matchAll(/<a:blip\b[^>]*r:embed="([^"]+)"/g)) {
       const relId = match[1];
       const relationship = relationships.get(relId);
@@ -85,7 +130,6 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
       const svgRelId = match[1];
       const fallbackRelId = block.match(/^<a:blip\b[^>]*r:embed="([^"]+)"/)?.[1];
       const svgRelationship = relationships.get(svgRelId);
-      const fallbackRelationship = fallbackRelId ? relationships.get(fallbackRelId) : undefined;
       if (!svgRelationship) {
         invalidSvgEmbeddings.push(`${slidePath}: missing SVG relationship ${svgRelId}`);
       } else {
@@ -94,13 +138,8 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
           invalidSvgEmbeddings.push(`${slidePath}: invalid SVG target ${svgRelId} -> ${svgRelationship.target}`);
         }
       }
-      if (!fallbackRelationship) {
-        invalidSvgEmbeddings.push(`${slidePath}: missing SVG fallback relationship ${fallbackRelId ?? "(none)"}`);
-      } else {
-        const fallbackTarget = resolveRelationshipTarget(slidePath, fallbackRelationship.target);
-        if (!fallbackTarget.toLowerCase().endsWith(".png") || !zip.file(fallbackTarget)) {
-          invalidSvgEmbeddings.push(`${slidePath}: invalid SVG fallback ${fallbackRelId} -> ${fallbackRelationship.target}`);
-        }
+      if (fallbackRelId) {
+        invalidSvgEmbeddings.push(`${slidePath}: native SVG must not declare fallback relationship ${fallbackRelId}`);
       }
     }
   }
@@ -108,6 +147,12 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
   if (notesPaths.length) errors.push(`notes parts remain: ${notesPaths.length}`);
   if (orphanRelationships.length) errors.push(`orphan relationship parts: ${orphanRelationships.length}`);
   if (danglingRelationships.length) errors.push(`dangling internal relationships: ${danglingRelationships.length}`);
+  if (invalidPresentationRelationships.length) errors.push(`invalid Presentation -> SlideLayout relationships: ${invalidPresentationRelationships.length}`);
+  if (nonCanonicalRelationshipIds.length) errors.push(`non-canonical relationship IDs: ${nonCanonicalRelationshipIds.length}`);
+  if (duplicateSlideCreationIds.length) errors.push(`duplicate slide creation IDs: ${duplicateSlideCreationIds.length}`);
+  if (duplicateShapeCreationIds.length) errors.push(`duplicate shape creation IDs: ${duplicateShapeCreationIds.length}`);
+  if (invalidAnimationTargets.length) errors.push(`invalid animation targets: ${invalidAnimationTargets.length}`);
+  if (unreferencedImageRelationships.length) errors.push(`unreferenced image relationships: ${unreferencedImageRelationships.length}`);
   if (missingImageRelationships.length) errors.push(`missing image relationships: ${missingImageRelationships.length}`);
   if (invalidSvgEmbeddings.length) errors.push(`invalid native SVG embeddings: ${invalidSvgEmbeddings.length}`);
   if (emptyPlaceholders.length) errors.push(`empty structural placeholders: ${emptyPlaceholders.length}`);
@@ -119,6 +164,12 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
     notesParts: notesPaths.length,
     orphanRelationships,
     danglingRelationships,
+    invalidPresentationRelationships,
+    nonCanonicalRelationshipIds,
+    duplicateSlideCreationIds,
+    duplicateShapeCreationIds,
+    invalidAnimationTargets,
+    unreferencedImageRelationships,
     missingImageRelationships,
     nativeSvgEmbeddings,
     invalidSvgEmbeddings,

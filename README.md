@@ -9,9 +9,12 @@
 - 编译选择窗格节点名与页面备注中的 DSL。
 - 支持普通文本、图片、图标、序号和固定列表。
 - 支持以 PowerPoint Group 为 Item 边界的变长列表。
+- 保留 Group 的交错布局合同，并统一同一列表中的图标槽位尺寸。
+- 光栅图片按真实宽高居中裁剪填充；SVG 以 Office 2019+ 原生单关系写入。
 - 生成 `template-manifest.json`、JSON Schema、Lint 报告与模板 SHA-256 锁文件。
-- 生成前校验页面类型、字段、文本长度、列表容量和目录/章节合同。
-- 生成后清理备注、DSL 节点名、悬空关系和孤立关系，并执行程序性验证。
+- 生成前校验页面类型、字段、可见文本长度、列表容量和目录/章节合同。
+- 生成后清理备注、DSL 节点名、悬空动画和无效关系，并规范化 relationship ID。
+- 对重复页面和 Group 重新分配唯一 creationId，避免 PowerPoint 修复提示。
 - 异常不会静默跳过：模板解析、输入越界、资源缺失和关系损坏都会返回非零退出码。
 
 ## 环境要求
@@ -19,7 +22,7 @@
 - Node.js 20 或更高版本
 - npm
 - PowerPoint 2019、PowerPoint 2021 或 Microsoft 365（用于制作带 DSL 标记的模板）
-- SVG 使用 Office 2019+ 原生 `asvg:svgBlip` 写入 PPTX，不进行栅格化
+- SVG 使用 Office 2019+ 原生 `asvg:svgBlip` 单关系写入 PPTX，不生成 fallback、不进行栅格化
 
 项目不依赖 Microsoft PowerPoint 编译、生成或执行程序性验证。
 
@@ -147,6 +150,7 @@ Skill 会按“编译模板 → 确认大纲 → 选择模板页与准备资产 
 - [`SKILL.md`](SKILL.md)：完整工作流和硬性边界
 - [`references/node-dsl-spec.md`](references/node-dsl-spec.md)：节点、列表 Group、页面备注和继承规则
 - [`references/deck-input.md`](references/deck-input.md)：Manifest 到 `DeckInput` 的映射规则
+- [`references/image-generation.md`](references/image-generation.md)：AI 生图预算、风格、构图和填充规则
 - [`references/programmatic-gates.md`](references/programmatic-gates.md)：编译、输入和输出 Gate
 - [`references/outline-workflow.md`](references/outline-workflow.md)：大纲生成与确认边界
 - [`references/icon-sources.md`](references/icon-sources.md)：图标来源、缓存与许可记录

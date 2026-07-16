@@ -97,9 +97,38 @@ async function validateValue(component: ComponentManifest, value: NodeValue, lab
   }
   const text = String(value);
   if (component.kind === "text" && component.length) {
-    const length = [...text].length;
+    const { length, hasInvalidCharacters } = meaningfulTextLength(text);
+    if (hasInvalidCharacters) {
+      errors.push(`${label} 包含不可见格式字符或非标准空白，按可见内容计长度 ${length}`);
+      return;
+    }
     if (length < component.length.min || length > component.length.max) errors.push(`${label} 长度 ${length} 不在 [${component.length.min}-${component.length.max}]`);
   }
+}
+
+export function meaningfulTextLength(text: string): { length: number; hasInvalidCharacters: boolean } {
+  let length = 0;
+  let seenVisible = false;
+  let pendingSpace = false;
+  let hasInvalidCharacters = false;
+  for (const character of text) {
+    if (/\p{Cf}/u.test(character)) {
+      hasInvalidCharacters = true;
+      continue;
+    }
+    if (/\s/u.test(character)) {
+      if (character !== " " && character !== "\n" && character !== "\t") hasInvalidCharacters = true;
+      if (seenVisible) pendingSpace = true;
+      continue;
+    }
+    if (pendingSpace) {
+      length += 1;
+      pendingSpace = false;
+    }
+    length += 1;
+    seenVisible = true;
+  }
+  return { length, hasInvalidCharacters };
 }
 
 export async function assertValidDeckInput(manifest: TemplateManifest, input: DeckInput): Promise<void> {
