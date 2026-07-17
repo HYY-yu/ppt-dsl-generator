@@ -141,6 +141,14 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
       if (fallbackRelId) {
         invalidSvgEmbeddings.push(`${slidePath}: native SVG must not declare fallback relationship ${fallbackRelId}`);
       }
+      const pictureStart = slideXml.lastIndexOf("<p:pic", match.index);
+      const pictureEnd = slideXml.indexOf("</p:pic>", match.index);
+      if (pictureStart >= 0 && pictureEnd >= 0) {
+        const picture = slideXml.slice(pictureStart, pictureEnd + "</p:pic>".length);
+        if (/<p:spPr\b[\s\S]*?<a:custGeom\b/.test(picture)) {
+          invalidSvgEmbeddings.push(`${slidePath}: native SVG picture must not retain custom geometry`);
+        }
+      }
     }
   }
 

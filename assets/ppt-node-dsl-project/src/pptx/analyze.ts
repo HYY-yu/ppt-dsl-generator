@@ -273,7 +273,7 @@ function inheritAndValidateContract(slideNumber: number, listIndex: number, item
 }
 
 function contractFromFirst(items: ListItemManifest[]): ListManifest["componentContract"] {
-  return (items[0]?.components ?? []).map(({ key, kind, ordinal, length, numberWidth, imageIndex }) => ({ key, kind, ordinal, length, numberWidth, imageIndex }));
+  return (items[0]?.components ?? []).map(({ key, kind, ordinal, sampleContent, length, numberWidth, imageIndex }) => ({ key, kind, ordinal, sampleContent, length, numberWidth, imageIndex }));
 }
 
 function toComponent(

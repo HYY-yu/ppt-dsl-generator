@@ -7,6 +7,7 @@ import { parseGroupName } from "../dsl/parse.js";
 import type { Box, ComponentManifest, DeckInput, ListItemManifest, ListManifest, NodeValue, SlideManifest, TemplateManifest } from "../types.js";
 import { assertValidDeckInput } from "../validation.js";
 import { assertManifestMatchesTemplate } from "../template-contract.js";
+import { bindDeterministicNumbers, formatDeterministicNumber } from "../deck-numbers.js";
 import { flattenNodes, maxShapeId, parseSlideNodes, reassignShapeIds, renameFirstNode, replaceNodeRaw, replaceTextInNode, setGroupBox, type XmlNode } from "./nodes.js";
 import { readPptx } from "./read.js";
 import { ownerPartForRelationshipPart, parsePresentationSlideRelIds, parseRelationships, relationshipPartForOwner, resolveRelationshipTarget } from "./relationships.js";
@@ -19,7 +20,8 @@ const SVG_NAMESPACE = "http://schemas.microsoft.com/office/drawing/2016/SVG/main
 
 export async function generateDeck(options: { templatePath: string; manifest: TemplateManifest; input: DeckInput; outPath: string }): Promise<void> {
   await assertManifestMatchesTemplate(options.manifest, options.templatePath);
-  await assertValidDeckInput(options.manifest, options.input);
+  const input = bindDeterministicNumbers(options.manifest, options.input);
+  await assertValidDeckInput(options.manifest, input);
   await mkdir(path.dirname(options.outPath), { recursive: true });
   const templateBuffer = await readFile(options.templatePath);
   const automizer = new Automizer({
@@ -32,13 +34,13 @@ export async function generateDeck(options: { templatePath: string; manifest: Te
     verbosity: 1,
   });
   let presentation = automizer.loadRoot(templateBuffer).load(templateBuffer, TEMPLATE_LABEL);
-  for (const inputSlide of options.input.slides) {
+  for (const inputSlide of input.slides) {
     const template = getSlide(options.manifest, inputSlide.templateId);
     presentation = presentation.addSlide(TEMPLATE_LABEL, template.slideNumber, (slide: ISlide) => { void slide; });
   }
   const summary = await presentation.write(path.basename(options.outPath));
-  await patchGeneratedDeck(options.outPath, options.manifest, options.input);
-  console.info(`[generate] status=${summary.status} outputSlides=${options.input.slides.length} automizerParts=${summary.slides}`);
+  await patchGeneratedDeck(options.outPath, options.manifest, input);
+  console.info(`[generate] status=${summary.status} outputSlides=${input.slides.length} automizerParts=${summary.slides}`);
 }
 
 async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, input: DeckInput): Promise<void> {
@@ -266,7 +268,7 @@ async function patchComponentNode(
   iconSide?: number,
 ): Promise<string> {
   if (component.kind === "text" || component.kind === "number") {
-    const text = component.kind === "number" ? formatNumber(value, component.numberWidth) : String(value);
+    const text = component.kind === "number" ? formatDeterministicNumber(value, component.numberWidth) : String(value);
     return replaceNodeRaw(xml, node, replaceTextInNode(node.raw, text));
   }
   const targetNode = component.kind === "icon" && iconSide ? normalizeIconNodeBox(node, iconSide) : node;
@@ -280,13 +282,17 @@ async function patchComponentNode(
     const existingSvgRelId = nativeSvgRelationshipId(targetNode.raw);
     const svgRelId = await addImageRelationship(zip, slidePath, svgMedia);
     console.info(`[generate:svg] mode=native-office2019 source=${path.basename(sourcePath)} media=${svgMedia} color=${colorDecision.color} background=${colorDecision.background}${"shapeId" in colorDecision && colorDecision.shapeId ? ` backgroundShapeId=${colorDecision.shapeId}` : ""}`);
-    const picture = targetNode.relId || existingSvgRelId ? targetNode.raw : pictureXml(targetNode, svgRelId);
+    const picture = component.kind === "icon"
+      ? pictureXml(targetNode, svgRelId, true)
+      : targetNode.relId || existingSvgRelId ? targetNode.raw : pictureXml(targetNode, svgRelId);
     return replaceNodeRaw(xml, node, embedNativeSvgInPictureXml(picture, svgRelId));
   }
   const media = await addRasterMedia(zip, sourcePath, serial);
   const existingSvgRelId = nativeSvgRelationshipId(targetNode.raw);
   const relId = await addImageRelationship(zip, slidePath, media.name);
-  const picture = targetNode.relId || existingSvgRelId ? targetNode.raw : pictureXml(targetNode, relId);
+  const picture = component.kind === "icon"
+    ? pictureXml(targetNode, relId, true)
+    : targetNode.relId || existingSvgRelId ? targetNode.raw : pictureXml(targetNode, relId);
   const replacement = centerCropRasterPictureXml(
     removeNativeSvgFromPictureXml(picture, relId),
     media.width,
@@ -388,12 +394,6 @@ function isWhiteFill(fill: string): boolean {
   const rgb = fill.match(/^rgb:([0-9A-Fa-f]{6})$/)?.[1];
   if (!rgb) return false;
   return [0, 2, 4].every((offset) => Number.parseInt(rgb.slice(offset, offset + 2), 16) >= 245);
-}
-
-function formatNumber(value: NodeValue, width = 1): string {
-  const raw = typeof value === "object" ? value.path : String(value);
-  const numeric = Number(raw);
-  return Number.isFinite(numeric) ? String(numeric).padStart(width, "0") : raw;
 }
 
 export async function addImageRelationship(zip: Awaited<ReturnType<typeof readPptx>>, slidePath: string, mediaName: string): Promise<string> {
@@ -574,10 +574,14 @@ function checkedRasterDimensions(width: number, height: number, extension: strin
   return { width, height };
 }
 
-function pictureXml(node: XmlNode, relId: string): string {
+export function pictureXml(node: XmlNode, relId: string, cleanGeometry = false): string {
   const box = node.box ?? { x: 0, y: 0, cx: 1, cy: 1 };
-  const shapeProperties = node.raw.match(/<p:spPr\b[\s\S]*?<\/p:spPr>/)?.[0]
-    ?? `<p:spPr><a:xfrm><a:off x="${box.x}" y="${box.y}"/><a:ext cx="${box.cx}" cy="${box.cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>`;
+  const fallbackTransform = `<a:xfrm><a:off x="${box.x}" y="${box.y}"/><a:ext cx="${box.cx}" cy="${box.cy}"/></a:xfrm>`;
+  const transform = node.raw.match(/<a:xfrm\b[\s\S]*?<\/a:xfrm>|<a:xfrm\b[^>]*\/>/)?.[0] ?? fallbackTransform;
+  const shapeProperties = cleanGeometry
+    ? `<p:spPr>${transform}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr>`
+    : node.raw.match(/<p:spPr\b[\s\S]*?<\/p:spPr>/)?.[0]
+      ?? `<p:spPr>${fallbackTransform}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom><a:noFill/></p:spPr>`;
   return `<p:pic><p:nvPicPr><p:cNvPr id="${node.id}" name="${escapeXml(node.name)}"/><p:cNvPicPr/><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></p:blipFill>${shapeProperties}</p:pic>`;
 }
 

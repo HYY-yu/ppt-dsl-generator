@@ -40,7 +40,7 @@ export interface ListManifest {
   maxItems: number;
   layout: "row" | "column";
   items: ListItemManifest[];
-  componentContract: Array<Pick<ComponentManifest, "key" | "kind" | "ordinal" | "length" | "numberWidth" | "imageIndex">>;
+  componentContract: Array<Pick<ComponentManifest, "key" | "kind" | "ordinal" | "sampleContent" | "length" | "numberWidth" | "imageIndex">>;
 }
 
 export interface SlideManifest {

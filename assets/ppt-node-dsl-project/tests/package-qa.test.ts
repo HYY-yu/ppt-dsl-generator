@@ -56,6 +56,19 @@ function sharedImageRelationshipPackage(): JSZip {
   return zip;
 }
 
+function nativeSvgPackage(withCustomGeometry: boolean): JSZip {
+  const zip = buildPackage();
+  zip.file("[Content_Types].xml", `<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="svg" ContentType="image/svg+xml"/></Types>`);
+  zip.file("ppt/_rels/presentation.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/slide" Target="slides/slide1.xml"/></Relationships>`);
+  const shapeProperties = withCustomGeometry
+    ? `<p:spPr><a:custGeom><a:pathLst/></a:custGeom></p:spPr>`
+    : `<p:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>`;
+  zip.file("ppt/slides/slide1.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/></p:nvGrpSpPr><p:grpSpPr/><p:pic><p:blipFill><a:blip><a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="rId2"/></a:ext></a:extLst></a:blip></p:blipFill>${shapeProperties}</p:pic></p:spTree></p:cSld></p:sld>`);
+  zip.file("ppt/slides/_rels/slide1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/icon.svg"/></Relationships>`);
+  zip.file("ppt/media/icon.svg", `<svg xmlns="http://www.w3.org/2000/svg"/>`);
+  return zip;
+}
+
 test("package QA rejects Presentation -> SlideLayout relationships", async () => {
   const result = await inspectPptxPackage(buildPackage());
   assert.equal(result.invalidPresentationRelationships.length, 1);
@@ -153,6 +166,18 @@ test("package QA rejects image relationships that no slide node references", asy
   const result = await inspectPptxPackage(sharedImageRelationshipPackage());
   assert.deepEqual(result.unreferencedImageRelationships, ["ppt/slides/slide1.xml: rId4 -> ../media/unused.svg"]);
   assert.match(result.errors.join("\n"), /unreferenced image relationships: 1/);
+});
+
+test("package QA accepts native SVG pictures with clean rectangular geometry", async () => {
+  const result = await inspectPptxPackage(nativeSvgPackage(false));
+  assert.equal(result.nativeSvgEmbeddings, 1);
+  assert.deepEqual(result.invalidSvgEmbeddings, []);
+});
+
+test("package QA rejects native SVG pictures that retain template custom geometry", async () => {
+  const result = await inspectPptxPackage(nativeSvgPackage(true));
+  assert.deepEqual(result.invalidSvgEmbeddings, ["ppt/slides/slide1.xml: native SVG picture must not retain custom geometry"]);
+  assert.match(result.errors.join("\n"), /invalid native SVG embeddings: 1/);
 });
 
 test("generation allocates independent image relationships and cleans only unused relationships", async () => {

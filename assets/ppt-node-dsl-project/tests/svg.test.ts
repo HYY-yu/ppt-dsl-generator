@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { canonicalListIconSides, embedNativeSvgInPictureXml, normalizeSvgForOffice, removeNativeSvgFromPictureXml, resolveIconColor, squareBoxAtCenter } from "../src/pptx/generate.js";
+import { canonicalListIconSides, embedNativeSvgInPictureXml, normalizeSvgForOffice, pictureXml, removeNativeSvgFromPictureXml, resolveIconColor, squareBoxAtCenter } from "../src/pptx/generate.js";
 import type { ListManifest } from "../src/types.js";
 
 function iconOnBackground(fill: string): string {
@@ -40,6 +40,21 @@ test("removes the native SVG extension when replacing it with a raster image", (
   assert.doesNotMatch(updated, /<a:extLst>\s*<\/a:extLst>/);
   assert.match(updated, /r:embed="rId4"/);
   assert.match(updated, /a14:useLocalDpi/);
+});
+
+test("rebuilds icon pictures without inheriting the template icon geometry", () => {
+  const source = {
+    id: "31",
+    name: "@图标{icon_1}",
+    type: "sp",
+    box: { x: 100, y: 200, cx: 300, cy: 300 },
+    raw: `<p:sp><p:spPr><a:xfrm rot="60000"><a:off x="100" y="200"/><a:ext cx="300" cy="300"/></a:xfrm><a:custGeom><a:pathLst/></a:custGeom><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:effectLst><a:outerShdw/></a:effectLst></p:spPr></p:sp>`,
+  };
+  const picture = pictureXml(source as unknown as Parameters<typeof pictureXml>[0], "rId3", true);
+  assert.match(picture, /<a:xfrm rot="60000">/);
+  assert.match(picture, /<a:prstGeom prst="rect">/);
+  assert.match(picture, /<a:blip r:embed="rId3"\/>/);
+  assert.doesNotMatch(picture, /a:custGeom|a:solidFill|a:effectLst/);
 });
 
 test("materializes currentColor as white for PowerPoint by default", () => {

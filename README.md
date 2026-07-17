@@ -11,7 +11,9 @@
 - 支持以 PowerPoint Group 为 Item 边界的变长列表。
 - 保留 Group 的交错布局合同，并统一同一列表中的图标槽位尺寸。
 - 光栅图片按真实宽高居中裁剪填充；SVG 以 Office 2019+ 原生单关系写入。
-- 生成 `template-manifest.json`、JSON Schema、Lint 报告与模板 SHA-256 锁文件。
+- 生成 `template-manifest.json`、内容草稿 Schema、完整输入 Schema、Lint 报告与模板 SHA-256 锁文件。
+- 支持“纯内容草稿校验 → 确定性绑定序号与资产 → 完整输入校验”的两阶段填充流程。
+- 将模板示例文案作为字段语义提示写入 Manifest 与 Schema，不把示例文案当作生成内容或长度合同。
 - 生成前校验页面类型、字段、可见文本长度、列表容量和目录/章节合同。
 - 生成后清理备注、DSL 节点名、悬空动画和无效关系，并规范化 relationship ID。
 - 对重复页面和 Group 重新分配唯一 creationId，避免 PowerPoint 修复提示。
@@ -38,6 +40,7 @@
 ├── examples/
 │   ├── README.md                    # 可运行示例说明
 │   ├── ppt_example.pptx             # 节点 DSL 学习模板
+│   ├── deck-content.example.json    # 仅包含文案与列表的内容草稿
 │   ├── deck-input.example.json      # 与示例模板匹配的输入
 │   └── 模板节点DSL标记指南.md
 └── references/                      # DSL、输入映射与 Gate 规范
@@ -68,11 +71,23 @@ npm run compile-template -- \
 
 - `template.pptx`
 - `template-manifest.json`
+- `deck-content.schema.json`
 - `input.schema.json`
 - `template-lint.json`
 - `template.lock.json`
 
-准备并校验 `DeckInput`：
+先校验仅包含文案与列表的内容草稿：
+
+```bash
+DECK_CONTENT_DRAFT="/绝对路径/deck-content.json"
+
+npm run validate-input -- \
+  --manifest "$COMPILED_DIR/template-manifest.json" \
+  --input "$DECK_CONTENT_DRAFT" \
+  --content-only
+```
+
+再完成确定性序号和资产绑定，并校验完整 `DeckInput`：
 
 ```bash
 DECK_INPUT="/绝对路径/deck-input.json"
@@ -143,13 +158,14 @@ git clone https://github.com/HYY-yu/ppt-dsl-generator.git \
 $ppt-node-dsl-generator
 ```
 
-Skill 会按“编译模板 → 确认大纲 → 选择模板页与准备资产 → 校验 DeckInput → 生成 PPTX → 程序性验证”的流程工作。
+Skill 会按“编译模板 → 确认大纲 → 选择模板页 → 校验内容草稿 → 确定性绑定序号与资产 → 校验完整 DeckInput → 生成 PPTX → 程序性验证”的流程工作。
 
 ## 文档导航
 
 - [`SKILL.md`](SKILL.md)：完整工作流和硬性边界
 - [`references/node-dsl-spec.md`](references/node-dsl-spec.md)：节点、列表 Group、页面备注和继承规则
 - [`references/deck-input.md`](references/deck-input.md)：Manifest 到 `DeckInput` 的映射规则
+- [`references/deck-fill-workflow.md`](references/deck-fill-workflow.md)：内容草稿、序号和资产的两阶段填充流程
 - [`references/image-generation.md`](references/image-generation.md)：AI 生图预算、风格、构图和填充规则
 - [`references/programmatic-gates.md`](references/programmatic-gates.md)：编译、输入和输出 Gate
 - [`references/outline-workflow.md`](references/outline-workflow.md)：大纲生成与确认边界

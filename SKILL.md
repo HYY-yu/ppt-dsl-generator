@@ -14,6 +14,7 @@ description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL
 - `examples/ppt_example.pptx`：节点 DSL 标记示例，仅用于学习和测试，不得作为默认模板或写入固定生成流程。
 - `references/node-dsl-spec.md`：节点名、Group 变长列表、备注和继承规则。编译模板或排查 lint 时读取。
 - `references/deck-input.md`：Manifest 到 `DeckInput` 的映射规则。大纲确认后读取。
+- `references/deck-fill-workflow.md`：章节批次、文本草稿、确定性序号/资产绑定和精确修复流程。使用 LLM 填充内容时读取。
 - `references/image-generation.md`：AI 生图数量、风格、提示词和图片框填充规则。需要补充或生成图片时读取。
 - `references/icon-sources.md`：免费 SVG 图标来源、下载与许可记录规则。需要填充图标时读取。
 - `references/programmatic-gates.md`：无需人工视觉 QA 时仍不得绕过的程序 gate。生成和交付时读取。
@@ -36,6 +37,7 @@ npm run compile-template -- --template "$TEMPLATE_PPTX" --out "$COMPILED_DIR"
 - `template.pptx`：保留 DSL 名称和备注的编译模板副本。
 - `template-manifest.json`
 - `input.schema.json`
+- `deck-content.schema.json`
 - `template-lint.json`
 - `template.lock.json`
 
@@ -43,21 +45,29 @@ Lint 失败时停止。报告页码、shapeId、节点名和原因；不要修�
 
 ### 2. 大纲确认
 
-读取 `references/outline-workflow.md`，从用户资料生成每页包含页面类型、逻辑关系、标题、要点、视觉需求和来源引用的大纲。持续与用户迭代；确认前不要选择模板页或编写 `DeckInput`。
+读取 `references/outline-workflow.md`，从用户资料生成每页包含页面类型、有序逻辑关系、标题、要点、视觉需求和来源引用的大纲。持续与用户迭代；确认前不要选择模板页或编写 `DeckInput`。默认生成恰好 1 张第二页目录、3-6 个章节，每个章节过渡页后至少安排 1 张内容页。
 
-### 3. 选择模板并准备资产
+### 3. 选择模板并规划资产
 
-根据页面类型、逻辑关系、文本长度、列表项数和组件种类选择 `templateId`。需要补充 AI 图片时先读取 `references/image-generation.md`；需要图标时读取 `references/icon-sources.md`。所有图片和 SVG 都先落到本地缓存再引用，不要将远程 URL 直接写入最终输入。
+先按页面类型、列表容量和资产可用性硬过滤，再按有序逻辑关系、容量接近度、版式重复惩罚和稳定 `templateId` 顺序选择 `templateId`。需要补充 AI 图片时先读取 `references/image-generation.md`；需要图标时读取 `references/icon-sources.md`。此阶段只规划页面级资产候选；所有图片和 SVG 都先落到本地缓存，不要将远程 URL 直接写入最终输入。
 
 ### 4. 生成并校验 DeckInput
 
-读取 `references/deck-input.md`。只能使用 Manifest 中存在的节点 key、列表 key 和组件 key：
+读取 `references/deck-input.md`；使用 LLM 填充时同时读取 `references/deck-fill-workflow.md`。按章节冻结批次，让 LLM 仅生成 `deck-content.schema.json` 允许的文本和列表结构；序号、图片和图标必须在文本内容校验通过后由程序或确定性流程绑定。最终 `DeckInput` 只能使用 Manifest 中存在的节点 key、列表 key 和组件 key：
+
+```bash
+npm run validate-input -- --manifest "$MANIFEST" --input "$DECK_CONTENT_DRAFT" --content-only
+```
+
+绑定序号、图片和图标后执行最终校验：
 
 ```bash
 npm run validate-input -- --manifest "$MANIFEST" --input "$DECK_INPUT"
 ```
 
-修复全部错误后才能生成。文本长度按可见 Unicode 码点计算，折叠重复空白并拒绝零宽字符、格式控制字符和非标准空白；禁止以不可见字符凑字数。若生成端为文本范围增加安全内缩，`maxLength <= 10` 的短文本必须保留模板原始范围，禁止应用百分比内缩。短标题与目录项必须在长度范围内自然改写为完整词语或短语，禁止机械截尾。动态列表后续项继承第一项的模板合同，不得根据第一项实际生成值的长度收窄合同。仅列表项中的序号可省略并由生成器按模板格式和 Item 位置自动产生，页面级序号必须显式填写。
+修复全部错误后才能生成。文本长度按可见 Unicode 码点计算，折叠重复空白并拒绝零宽字符、格式控制字符和非标准空白；禁止以不可见字符凑字数。若生成端为文本范围增加安全内缩，`maxLength <= 10` 的短文本必须保留模板原始范围，禁止应用百分比内缩。短标题与目录项必须在长度范围内自然改写为完整词语或短语，禁止机械截尾。动态列表后续项继承第一项的模板合同，不得根据第一项实际生成值的长度收窄合同。所有序号均可从输入省略：列表序号按 Item 位置填充，页面级序号只允许出现在章节过渡页并按章节顺序填充。候选可校验后只做路径级 `set_text`、`replace_list` 或 `remove` 修复，不重新生成完整 DeckInput；连续 3 轮验证指纹不变时停止。
+
+编译器必须把文本节点的 `sampleContent` 写入 Manifest、列表 `componentContract` 和 `input.schema.json` 对应字段的 `description`。若使用 LLM 生成 DeckInput，必须让模型在 prompt 或原生 structured-output JSON Schema 中看到这些语义示例；`sampleContent` 只用于理解该槽位大概承载标题、短语、说明或其他哪类文本，禁止照抄，也不得把样例长度当成字段长度合同。兼容旧 Manifest 时，若列表 `componentContract` 缺少 `sampleContent`，从 `items[0].components` 的同 key 组件回填。
 
 ### 5. 生成 PPTX
 
@@ -72,6 +82,7 @@ npm run generate -- \
 生成器必须：
 
 - 校验模板 SHA-256。
+- 拒绝缺少 `slideNumber`、`slidePath`、列表 `items` 或组件 locator 的精简 Manifest。
 - 使用原模板页面和母版。
 - 按 shapeId 精确替换普通节点与固定列表节点。
 - 以 Group 为变长列表 Item 边界，删除、复制并在原列表区域均匀布局。
@@ -80,6 +91,7 @@ npm run generate -- \
 - 同一固定或变长列表的每个 `icon_n` 以第一项同名图标槽位为标准，取第一项宽高较短边作为统一边长，将后续图标框改为相同正方形并保持各自中心点不变。
 - 光栅图片按真实宽高居中裁剪填充目标图片框：保持模板图片框的位置、尺寸和形状，不拉伸、不留白；宽图对称裁左右，长图对称裁上下。
 - 将图片写入 PPTX 本地媒体包；SVG 以 Office 2019+ 原生 `asvg:svgBlip` 单 SVG 关系写入，不添加透明 PNG fallback、不栅格化、不依赖操作系统转换器。将 SVG 的 `currentColor` 物化为显式颜色：图标中心下方可确认是白色或近白色填充时使用深灰 `#404040`，其他背景或无法确认时使用白色 `#FFFFFF`。
+- 替换 icon 时只保留模板槽位的变换信息（位置、尺寸、旋转和翻转），将节点重建为无填充、无线条的矩形图片；不得继承模板原 icon 的 `custGeom`、填充、线条、阴影或其他效果，否则新 SVG 可能仍呈现原模板图标的外观。
 - 每个被替换的图片或 icon 节点创建独立 image relationship，不复用或重定向模板已有的共享 `rId`；整页替换完成后统一清理未引用图片关系。
 - 删除备注、悬空关系、孤立关系，以及 `ppt/_rels/presentation.xml.rels` 中 Office 不允许的 `Presentation -> SlideLayout` 显式关系。
 - 将 Automizer 产生的 `rId*-created` 等非规范 relationship ID 改写为纯数字 `rIdN`，并同步更新 owner XML 中的引用。
@@ -104,17 +116,20 @@ npm run verify -- --pptx "$OUTPUT_PPTX"
 - Group 内组件只标记 `@文本`、`@图片`、`@图标`、`@序号`，不得重复列表前缀。
 - 固定列表可继续使用节点名 `@1@1 文本[4-10]`、`@1@2 文本`。
 - 同一列表不能混用 Group DSL 和固定列表节点 DSL。
-- 生成 Deck 必须包含封面页、目录页、内容页和结尾页；第一张必须是封面页，最后一张必须是结尾页。
-- 目录页必须位于第一张章节过渡页之前，且至少包含 1 个目录项。
-- 所有目录页的列表项总数必须与章节过渡页数量完全一致；章节过渡页序号必须从 1 开始连续递增。
+- 生成 Deck 必须包含封面页、目录页、章节过渡页、内容页和结尾页；第一张必须是封面页，第二张必须是唯一目录页，最后一张必须是结尾页。
+- 默认章节数量为 3-6；每张章节过渡页后必须至少有 1 张内容页，内容页不得出现在第一张章节过渡页之前。
+- 目录列表项数必须与章节过渡页数量完全一致；章节过渡页序号必须从 1 开始连续递增。
+- LLM 只生成文本和列表结构；页面级与列表级序号、图片和图标均由确定性流程后置绑定。
 - 第一项定义列表组件合同，后续项继承长度、序号格式和组件槽位，并且组件结构必须完全一致。
 - 第一项的实际填充值不参与合同推导；`@文本[2-4]` 必须始终允许后续项填写 2-4 字。最大长度不超过 10 的文本范围不得做百分比内缩。
+- `sampleContent` 必须进入普通节点、列表 `componentContract` 和面向 LLM 的 JSON Schema/prompt；它是语义示例，不是默认输出、事实来源或长度合同。
 - 变长列表 Group 的外层位置和尺寸属于模板语义；时间轴、阶梯、蛇形等交错布局不得被强制压成单行或单列。
 - 同一列表的 `icon_n` 必须继承第一项同名图标槽位的较短边，最终图标框为相同正方形且中心点不变。
-- 同一 Deck 的 AI 生图限制为 1-3 张且只使用一种已支持风格；图片统一为 1:1 正方形，主体和关键元素位于中央安全区，纯装饰、无文字，并由 Runtime 居中裁剪填充模板图片框。
+- 同一 Deck 的 AI 生图限制为 1-3 张且只使用一种已支持风格；按最终选中模板的实际图片框比例量化为 1:1、4:3、16:9、3:4 或 9:16，缺少几何时回退 1:1；主体和关键元素位于中央 70% 安全区，纯装饰、无文字，并由 Runtime 居中裁剪填充模板图片框。
 - 未标记节点不得因内容生成而移动、删除或重画。
 - 模板路径始终来自当前用户输入；不得在代码、命令、默认配置或提示词中硬编码 examples 文件名或任何历史模板路径。
 - 原生 SVG 输出只面向 PowerPoint 2019 及以上版本；不为旧版 Office 执行栅格化兼容处理。
+- icon 输出节点必须使用干净的矩形 `p:spPr`，不得保留模板 icon 的 `a:custGeom`、`a:solidFill`、可见线条或效果；模板 icon 仅提供槽位变换合同。
 - `ppt/presentation.xml` 不得直接关联 SlideLayout；页面布局必须经由 SlideMaster/Slide 的合法关系引用。
 - 所有 relationship ID 必须匹配 `^rId\d+$`；PowerPoint 会将 `rId*-created` 视为需修复的包。
 - 图片或 icon 节点替换不得重定向共享 relationship；最终 slide relationships 中不得残留未被同页 XML 引用的 image relationship。

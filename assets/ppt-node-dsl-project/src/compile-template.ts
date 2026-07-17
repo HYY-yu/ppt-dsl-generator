@@ -3,7 +3,7 @@ import path from "node:path";
 import { Command } from "commander";
 import { analyzeTemplate } from "./pptx/analyze.js";
 import { readPptx } from "./pptx/read.js";
-import { buildInputSchema } from "./schema.js";
+import { buildDeckContentSchema, buildInputSchema } from "./schema.js";
 import { attachTemplateFingerprint } from "./template-contract.js";
 import { lintTemplate } from "./lint.js";
 
@@ -18,6 +18,7 @@ const manifest = await attachTemplateFingerprint(await analyzeTemplate(await rea
 const lint = lintTemplate(manifest);
 await writeFile(path.join(outDir, "template-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
 await writeFile(path.join(outDir, "input.schema.json"), `${JSON.stringify(buildInputSchema(manifest), null, 2)}\n`);
+await writeFile(path.join(outDir, "deck-content.schema.json"), `${JSON.stringify(buildDeckContentSchema(manifest), null, 2)}\n`);
 await writeFile(path.join(outDir, "template-lint.json"), `${JSON.stringify(lint, null, 2)}\n`);
 await writeFile(path.join(outDir, "template.lock.json"), `${JSON.stringify({ manifestVersion: manifest.manifestVersion, templateSha256: manifest.templateSha256 }, null, 2)}\n`);
 await copyFile(templatePath, path.join(outDir, "template.pptx"));

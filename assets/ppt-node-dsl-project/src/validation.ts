@@ -3,15 +3,27 @@ import path from "node:path";
 import type { ComponentManifest, DeckInput, NodeValue, TemplateManifest } from "./types.js";
 
 export async function validateDeckInput(manifest: TemplateManifest, input: DeckInput): Promise<string[]> {
+  return validateDeck(manifest, input, false);
+}
+
+export async function validateDeckContent(manifest: TemplateManifest, input: DeckInput): Promise<string[]> {
+  return validateDeck(manifest, input, true);
+}
+
+async function validateDeck(manifest: TemplateManifest, input: DeckInput, contentOnly: boolean): Promise<string[]> {
   const errors: string[] = [];
   if (!Array.isArray(input.slides) || !input.slides.length) return ["slides 必须是非空数组"];
   for (let slideIndex = 0; slideIndex < input.slides.length; slideIndex += 1) {
     const inputSlide = input.slides[slideIndex];
     const template = manifest.slides.find((slide) => slide.templateId === inputSlide.templateId);
     if (!template) { errors.push(`slides[${slideIndex}] templateId 不存在: ${inputSlide.templateId}`); continue; }
-    const allowedNodes = new Set(template.nodes.map((node) => node.key));
+    if (template.pageType !== "章节过渡页" && template.nodes.some((component) => component.kind === "number")) {
+      errors.push(`${inputSlide.templateId} 只有章节过渡页允许页面级序号节点`);
+    }
+    const nodeContracts = contentOnly ? template.nodes.filter((component) => component.kind === "text") : template.nodes;
+    const allowedNodes = new Set(nodeContracts.map((node) => node.key));
     for (const key of Object.keys(inputSlide.nodes ?? {})) if (!allowedNodes.has(key)) errors.push(`${inputSlide.templateId}.nodes 不允许字段: ${key}`);
-    for (const component of template.nodes) {
+    for (const component of nodeContracts) {
       const value = inputSlide.nodes?.[component.key];
       if (value === undefined) errors.push(`${inputSlide.templateId}.nodes 缺少 ${component.key}`);
       else await validateValue(component, value, `${inputSlide.templateId}.nodes.${component.key}`, errors);
@@ -24,9 +36,10 @@ export async function validateDeckInput(manifest: TemplateManifest, input: DeckI
       if (items.length < list.minItems || items.length > list.maxItems) errors.push(`${inputSlide.templateId}.${list.key} 项数 ${items.length} 不在 [${list.minItems}-${list.maxItems}]`);
       for (let itemIndex = 0; itemIndex < items.length; itemIndex += 1) {
         const item = items[itemIndex];
-        const allowed = new Set(list.componentContract.map((component) => component.key));
+        const componentContracts = contentOnly ? list.componentContract.filter((component) => component.kind === "text") : list.componentContract;
+        const allowed = new Set(componentContracts.map((component) => component.key));
         for (const key of Object.keys(item)) if (!allowed.has(key)) errors.push(`${inputSlide.templateId}.${list.key}[${itemIndex}] 不允许字段: ${key}`);
-        for (const contract of list.componentContract) {
+        for (const contract of componentContracts) {
           const value = item[contract.key];
           if (value === undefined && contract.kind === "number") continue;
           if (value === undefined) { errors.push(`${inputSlide.templateId}.${list.key}[${itemIndex}] 缺少 ${contract.key}`); continue; }
@@ -37,7 +50,7 @@ export async function validateDeckInput(manifest: TemplateManifest, input: DeckI
     }
   }
   validateDeckStructure(manifest, input, errors);
-  validateDirectoryTransitionContract(manifest, input, errors);
+  validateDirectoryTransitionContract(manifest, input, errors, !contentOnly);
   return errors;
 }
 
@@ -50,14 +63,34 @@ function validateDeckStructure(manifest: TemplateManifest, input: DeckInput, err
   if (pageTypes[0] !== "封面页") errors.push("第一张必须是封面页");
   if (pageTypes.at(-1) !== "结尾页") errors.push("最后一张必须是结尾页");
 
-  const directoryIndex = pageTypes.indexOf("目录页");
-  const transitionIndex = pageTypes.indexOf("章节过渡页");
-  if (directoryIndex >= 0 && transitionIndex >= 0 && directoryIndex > transitionIndex) {
-    errors.push("目录页必须位于第一张章节过渡页之前");
+  const directoryIndexes = pageTypes.flatMap((pageType, index) => pageType === "目录页" ? [index] : []);
+  if (directoryIndexes.length !== 1) errors.push(`整套 Deck 必须恰好包含 1 张目录页，实际 ${directoryIndexes.length}`);
+  if (pageTypes[1] !== "目录页") errors.push("第二张必须是目录页");
+
+  const transitionCount = pageTypes.filter((pageType) => pageType === "章节过渡页").length;
+  if (transitionCount < 3 || transitionCount > 6) errors.push(`章节数量必须在 3-6，实际 ${transitionCount}`);
+
+  let activeChapter = 0;
+  let contentCount = 0;
+  for (let slideIndex = 2; slideIndex < pageTypes.length - 1; slideIndex += 1) {
+    const pageType = pageTypes[slideIndex];
+    if (pageType === "章节过渡页") {
+      if (activeChapter > 0 && contentCount === 0) errors.push(`第 ${activeChapter} 个章节过渡页后没有内容页`);
+      activeChapter += 1;
+      contentCount = 0;
+      continue;
+    }
+    if (pageType === "内容页") {
+      if (activeChapter === 0) errors.push(`slides[${slideIndex}] 内容页必须位于某个章节过渡页之后`);
+      else contentCount += 1;
+      continue;
+    }
+    if (pageType !== undefined) errors.push(`目录与结尾之间只允许章节过渡页和内容页，slides[${slideIndex}]=${pageType}`);
   }
+  if (activeChapter > 0 && contentCount === 0) errors.push(`第 ${activeChapter} 个章节过渡页后没有内容页`);
 }
 
-function validateDirectoryTransitionContract(manifest: TemplateManifest, input: DeckInput, errors: string[]): void {
+function validateDirectoryTransitionContract(manifest: TemplateManifest, input: DeckInput, errors: string[], validateNumbers: boolean): void {
   const resolved = input.slides.map((slide, index) => ({
     index,
     input: slide,
@@ -73,6 +106,7 @@ function validateDirectoryTransitionContract(manifest: TemplateManifest, input: 
   if (directoryItemCount !== transitions.length) {
     errors.push(`目录项数 ${directoryItemCount} 必须等于章节过渡页数 ${transitions.length}`);
   }
+  if (!validateNumbers) return;
   transitions.forEach((slide, index) => {
     const numberNode = slide.template?.nodes.find((component) => component.kind === "number");
     if (!numberNode) {

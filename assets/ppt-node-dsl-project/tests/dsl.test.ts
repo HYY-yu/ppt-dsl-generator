@@ -13,7 +13,9 @@ test("parses simple components inside a group", () => {
   assert.equal(parseComponentName("@ 文本[4-10]")?.kind, "text");
   assert.equal(parseComponentName("@文本框[4-10]")?.kind, "text");
   assert.equal(parseComponentName("@图片-3")?.imageIndex, 3);
+  assert.equal(parseComponentName("@序号-1")?.numberWidth, 1);
   assert.equal(parseComponentName("@序号-01")?.numberWidth, 2);
+  assert.equal(parseComponentName("@序号-001")?.numberWidth, 3);
   assert.equal(parseComponentName("@图标")?.kind, "icon");
 });
 

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { ComponentManifest, DeckInput, SlideManifest, TemplateManifest } from "../src/types.js";
-import { meaningfulTextLength, validateDeckInput } from "../src/validation.js";
+import { meaningfulTextLength, validateDeckContent, validateDeckInput } from "../src/validation.js";
 
 const locator = { shapeId: "1", shapeName: "@文本[2-4]", nodeType: "sp" as const, path: [0] };
 const text: ComponentManifest = { key: "text_1", kind: "text", ordinal: 1, rawDsl: "@文本[2-4]", sampleContent: "章节", length: { min: 2, max: 4, fixed: false }, locator };
@@ -9,7 +9,7 @@ const number: ComponentManifest = { key: "number_1", kind: "number", ordinal: 1,
 const base = { slidePath: "ppt/slides/slide1.xml", logic: [], warnings: [] };
 const directory: SlideManifest = {
   ...base, templateId: "directory", slideNumber: 1, pageType: "目录页", nodes: [],
-  lists: [{ key: "list_1", listIndex: 1, dynamic: true, minItems: 1, maxItems: 5, layout: "row", items: [{ itemIndex: 1, components: [text] }], componentContract: [{ key: "text_1", kind: "text", ordinal: 1, length: text.length }] }],
+  lists: [{ key: "list_1", listIndex: 1, dynamic: true, minItems: 1, maxItems: 5, layout: "row", items: [{ itemIndex: 1, components: [text] }], componentContract: [{ key: "text_1", kind: "text", ordinal: 1, sampleContent: text.sampleContent, length: text.length }] }],
 };
 const transition: SlideManifest = { ...base, templateId: "transition", slideNumber: 2, pageType: "章节过渡页", nodes: [text, number], lists: [] };
 const manifest: TemplateManifest = { sourceTemplate: "fixture.pptx", generatedAt: "", slideCount: 2, slides: [directory, transition] };
@@ -76,7 +76,66 @@ test("requires directory before the first transition", async () => {
     ],
   };
   const errors = await validateDeckInput(completeManifest, input);
-  assert.ok(errors.includes("目录页必须位于第一张章节过渡页之前"));
+  assert.ok(errors.includes("第二张必须是目录页"));
+});
+
+test("requires exactly one second-page directory and three to six chapters", async () => {
+  const emptySlide = (templateId: string, slideNumber: number, pageType: SlideManifest["pageType"]): SlideManifest => ({
+    ...base, templateId, slideNumber, pageType, nodes: [], lists: [],
+  });
+  const completeManifest: TemplateManifest = {
+    ...manifest,
+    slideCount: 5,
+    slides: [
+      emptySlide("cover", 1, "封面页"),
+      directory,
+      transition,
+      emptySlide("content", 4, "内容页"),
+      emptySlide("ending", 5, "结尾页"),
+    ],
+  };
+  const input: DeckInput = {
+    slides: [
+      { templateId: "cover" },
+      { templateId: "directory", lists: { list_1: [{ text_1: "章节" }] } },
+      { templateId: "transition", nodes: { text_1: "章节", number_1: 1 } },
+      { templateId: "content" },
+      { templateId: "ending" },
+    ],
+  };
+
+  const errors = await validateDeckInput(completeManifest, input);
+  assert.ok(errors.includes("章节数量必须在 3-6，实际 1"));
+});
+
+test("requires at least one content slide after every transition", async () => {
+  const emptySlide = (templateId: string, slideNumber: number, pageType: SlideManifest["pageType"]): SlideManifest => ({
+    ...base, templateId, slideNumber, pageType, nodes: [], lists: [],
+  });
+  const completeManifest: TemplateManifest = {
+    ...manifest,
+    slideCount: 5,
+    slides: [
+      emptySlide("cover", 1, "封面页"),
+      directory,
+      transition,
+      emptySlide("content", 4, "内容页"),
+      emptySlide("ending", 5, "结尾页"),
+    ],
+  };
+  const input: DeckInput = {
+    slides: [
+      { templateId: "cover" },
+      { templateId: "directory", lists: { list_1: [{ text_1: "章节" }, { text_1: "行动" }] } },
+      { templateId: "transition", nodes: { text_1: "章节", number_1: 1 } },
+      { templateId: "transition", nodes: { text_1: "行动", number_1: 2 } },
+      { templateId: "content" },
+      { templateId: "ending" },
+    ],
+  };
+
+  const errors = await validateDeckInput(completeManifest, input);
+  assert.ok(errors.includes("第 1 个章节过渡页后没有内容页"));
 });
 
 test("rejects invisible Unicode padding in text fields", async () => {
@@ -93,4 +152,19 @@ test("rejects invisible Unicode padding in text fields", async () => {
 test("meaningful text length collapses repeated whitespace", () => {
   assert.deepEqual(meaningfulTextLength("  alpha     beta  "), { length: 10, hasInvalidCharacters: false });
   assert.deepEqual(meaningfulTextLength("内容\u205f\u205f"), { length: 2, hasInvalidCharacters: true });
+});
+
+test("content validation allows missing deterministic numbers and rejects non-text output", async () => {
+  const contentInput: DeckInput = {
+    slides: [
+      { templateId: "directory", lists: { list_1: [{ text_1: "章节" }] } },
+      { templateId: "transition", nodes: { text_1: "章节" } },
+    ],
+  };
+  const contentErrors = await validateDeckContent(manifest, contentInput);
+  assert.ok(!contentErrors.some((error) => error.includes("number_1")));
+
+  contentInput.slides[1].nodes!.number_1 = 1;
+  const nonTextErrors = await validateDeckContent(manifest, contentInput);
+  assert.ok(nonTextErrors.some((error) => error.includes("nodes 不允许字段: number_1")));
 });
