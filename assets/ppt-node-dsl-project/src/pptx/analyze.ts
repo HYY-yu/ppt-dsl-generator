@@ -105,8 +105,8 @@ function buildDynamicList(
 ): ListManifest {
   const groups = [...unorderedGroups].sort((a, b) => parseGroupName(a.name)!.itemIndex - parseGroupName(b.name)!.itemIndex);
   const firstParsed = parseGroupName(groups[0].name)!;
-  if (firstParsed.itemIndex !== 1 || !firstParsed.range) {
-    warnings.push(`ERROR: 第 ${slideNumber} 页变长列表 ${listIndex} 的第一组必须命名为 @${listIndex}@1[min-max]`);
+  if (firstParsed.itemIndex !== 1) {
+    warnings.push(`ERROR: 第 ${slideNumber} 页 Group 列表 ${listIndex} 的第一组必须从 @${listIndex}@1 开始`);
   }
   groups.slice(1).forEach((group) => {
     if (parseGroupName(group.name)?.range) warnings.push(`ERROR: 第 ${slideNumber} 页列表 ${listIndex} 只有第一组可以声明范围`);

@@ -11,7 +11,7 @@ export function lintTemplate(manifest: TemplateManifest): LintResult {
     if (!editable) errors.push(`第 ${slide.slideNumber} 页没有可编辑 DSL 节点`);
     for (const node of slide.nodes) validateComponent(slide.slideNumber, node, errors);
     for (const list of slide.lists) {
-      if (list.dynamic && !list.items.every((item) => item.groupLocator?.nodeType === "grpSp")) errors.push(`第 ${slide.slideNumber} 页变长列表 ${list.listIndex} 必须全部使用 Group`);
+      if (list.dynamic && !list.items.every((item) => item.groupLocator?.nodeType === "grpSp")) errors.push(`第 ${slide.slideNumber} 页 Group 列表 ${list.listIndex} 必须全部使用 Group`);
       if (list.items.length < list.minItems || list.items.length > list.maxItems) errors.push(`第 ${slide.slideNumber} 页列表 ${list.listIndex} 模板项数 ${list.items.length} 不在 [${list.minItems}-${list.maxItems}]`);
       list.items.flatMap((item) => item.components).forEach((component) => validateComponent(slide.slideNumber, component, errors));
     }

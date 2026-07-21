@@ -8,7 +8,7 @@
 
 - 编译选择窗格节点名与页面备注中的 DSL。
 - 支持普通文本、图片、图标、序号和固定列表。
-- 支持以 PowerPoint Group 为 Item 边界的变长列表。
+- 支持以 PowerPoint Group 为 Item 边界的定长和变长列表；首组不声明范围时保持定长，声明范围时允许增删 Item。
 - 保留 Group 的交错布局合同，并统一同一列表中的图标槽位尺寸。
 - 光栅图片按真实宽高居中裁剪填充；SVG 以 Office 2019+ 原生单关系写入。
 - 生成 `template-manifest.json`、内容草稿 Schema、完整输入 Schema、Lint 报告与模板 SHA-256 锁文件。
@@ -136,7 +136,15 @@ npm run verify -- --pptx "$OUTPUT_PPTX"
 @1@2 序号
 ```
 
-变长列表必须将每个完整 Item 制作为 PowerPoint Group：
+Group 定长列表将每个完整 Item 制作为 PowerPoint Group，不声明范围：
+
+```text
+@1@1
+@1@2
+@1@3
+```
+
+需要允许 Item 数变化时，只在第一组声明范围：
 
 ```text
 @1@1[3-5]
@@ -166,7 +174,7 @@ Skill 会按“编译模板 → 按目录容量确认大纲 → 选择模板页 
 ## 文档导航
 
 - [`SKILL.md`](SKILL.md)：完整工作流和硬性边界
-- [`references/node-dsl-spec.md`](references/node-dsl-spec.md)：节点、列表 Group、页面备注和继承规则
+- [`references/node-dsl-spec.md`](references/node-dsl-spec.md)：节点、Group 定长/变长列表、页面备注和继承规则
 - [`references/deck-input.md`](references/deck-input.md)：Manifest 到 `DeckInput` 的映射规则
 - [`references/deck-fill-workflow.md`](references/deck-fill-workflow.md)：内容草稿、序号和资产的两阶段填充流程
 - [`references/image-generation.md`](references/image-generation.md)：AI 生图预算、风格、构图和填充规则

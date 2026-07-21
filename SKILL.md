@@ -1,6 +1,6 @@
 ---
 name: ppt-node-dsl-generator
-description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL 的 PPTX 模板。用于分析节点名中的文本、图片、图标、序号、固定列表和 Group 化变长列表，根据页面备注中的页面类型与逻辑关系生成受约束的大纲、DeckInput 和 PPTX，并以程序性结构校验替代逐页人工视觉 QA。
+description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL 的 PPTX 模板。用于分析节点名中的文本、图片、图标、序号、固定列表和 Group 化定长/变长列表，根据页面备注中的页面类型与逻辑关系生成受约束的大纲、DeckInput 和 PPTX，并以程序性结构校验替代逐页人工视觉 QA。
 ---
 
 # PPT 节点 DSL 生成器
@@ -12,7 +12,7 @@ description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL
 - `assets/ppt-node-dsl-project/`：Node/TypeScript 编译、校验、生成和验证项目。
 - `examples/模板节点DSL标记指南.md`：指导用户制作自己的节点 DSL 模板；用户未提供合格模板时读取。
 - `examples/ppt_example.pptx`：节点 DSL 标记示例，仅用于学习和测试，不得作为默认模板或写入固定生成流程。
-- `references/node-dsl-spec.md`：节点名、Group 变长列表、备注和继承规则。编译模板或排查 lint 时读取。
+- `references/node-dsl-spec.md`：节点名、Group 定长/变长列表、备注和继承规则。编译模板或排查 lint 时读取。
 - `references/deck-input.md`：Manifest 到 `DeckInput` 的映射规则。大纲确认后读取。
 - `references/deck-fill-workflow.md`：章节批次、文本草稿、确定性序号/资产绑定和精确修复流程。使用 LLM 填充内容时读取。
 - `references/image-generation.md`：AI 生图数量、风格、提示词和图片框填充规则。需要补充或生成图片时读取。
@@ -87,7 +87,7 @@ npm run generate -- \
 - 拒绝缺少 `slideNumber`、`slidePath`、列表 `items` 或组件 locator 的精简 Manifest。
 - 使用原模板页面和母版。
 - 按 shapeId 精确替换普通节点与固定列表节点。
-- 以 Group 为变长列表 Item 边界，删除、复制并在原列表区域均匀布局。
+- 以 Group 为列表 Item 边界；无范围声明时保持定长，有范围声明时允许删除、复制并在原列表区域均匀布局。
 - 保持 Group 内部组件结构和相对坐标。
 - 将模板中每个 Group 的外层几何视为布局合同：Item 数不变时完整保留原始框；Item 数变化且存在交错模式时，只沿主轴重新分布，并继承模板的副轴位置、尺寸和周期。
 - 同一固定或变长列表的每个 `icon_n` 以第一项同名图标槽位为标准，取第一项宽高较短边作为统一边长，将后续图标框改为相同正方形并保持各自中心点不变。
@@ -114,7 +114,7 @@ npm run verify -- --pptx "$OUTPUT_PPTX"
 
 ## 硬性边界
 
-- 变长列表必须使用 PowerPoint Group；第一项组名声明范围，例如 `@1@1[3-5]`，后续组名为 `@1@2`、`@1@3`。
+- Group 列表的第一项必须从 `@1@1` 开始，后续为 `@1@2`、`@1@3`。第一项不声明范围时，列表长度固定为模板中的 Group 数量；声明 `@1@1[3-5]` 时为允许 3-5 项的变长列表。
 - Group 内组件只标记 `@文本`、`@图片`、`@图标`、`@序号`，不得重复列表前缀。
 - 固定列表可继续使用节点名 `@1@1 文本[4-10]`、`@1@2 文本`。
 - 同一列表不能混用 Group DSL 和固定列表节点 DSL。
