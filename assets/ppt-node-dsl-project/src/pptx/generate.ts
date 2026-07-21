@@ -29,7 +29,10 @@ export async function generateDeck(options: { templatePath: string; manifest: Te
     removeExistingSlides: true,
     autoImportSlideMasters: true,
     assertRelatedContents: true,
-    cleanup: true,
+    // pptx-automizer@0.8.2 may collect an unresolved SVG fallback relation as
+    // `undefined` and dereference `.filename`. Keep its cleanup disabled and
+    // perform deterministic package cleanup in patchGeneratedDeck instead.
+    cleanup: false,
     compression: 6,
     verbosity: 1,
   });
@@ -71,6 +74,7 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
     xml = cleanDslNames(xml);
     zip.file(slidePath, xml);
   }
+  const removedUnreferencedSlideParts = await removeUnreferencedSlideParts(zip, slidePaths);
   const removedUnreferencedImageRelationships = await removeUnreferencedSlideImageRelationships(zip);
   const removedNotesParts = await removeSpeakerNotes(zip);
   const removedOrphanRelationshipParts = removeOrphanRelationshipParts(zip);
@@ -79,7 +83,8 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
   const removedInvalidAnimationTimelines = await removeInvalidAnimationTimelines(zip);
   const regeneratedCreationIds = await regenerateDuplicateCreationIds(zip);
   const dangling = await removeDanglingRelationships(zip);
-  console.info(`[generate:cleanup] notesParts=${removedNotesParts} orphanRelationshipParts=${removedOrphanRelationshipParts} unreferencedImageRelationships=${removedUnreferencedImageRelationships.count} invalidPresentationRelationships=${invalidPresentationRelationships.count} normalizedRelationshipIds=${normalizedRelationshipIds.count} invalidAnimationTimelines=${removedInvalidAnimationTimelines.count} duplicateSlideCreationIds=${regeneratedCreationIds.slideCount} duplicateShapeCreationIds=${regeneratedCreationIds.shapeCount}`);
+  const removedUnreferencedMediaParts = await removeUnreferencedMediaParts(zip);
+  console.info(`[generate:cleanup] notesParts=${removedNotesParts} unreferencedSlideParts=${removedUnreferencedSlideParts} unreferencedMediaParts=${removedUnreferencedMediaParts.count} orphanRelationshipParts=${removedOrphanRelationshipParts} unreferencedImageRelationships=${removedUnreferencedImageRelationships.count} invalidPresentationRelationships=${invalidPresentationRelationships.count} normalizedRelationshipIds=${normalizedRelationshipIds.count} invalidAnimationTimelines=${removedInvalidAnimationTimelines.count} duplicateSlideCreationIds=${regeneratedCreationIds.slideCount} duplicateShapeCreationIds=${regeneratedCreationIds.shapeCount}`);
   if (removedUnreferencedImageRelationships.count > 0) {
     console.warn(`[generate:cleanup] unreferencedImageRelationshipsRemoved=${removedUnreferencedImageRelationships.count} samples=${removedUnreferencedImageRelationships.samples.join(",")}`);
   }
@@ -97,6 +102,9 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
   }
   if (dangling.count > 0) {
     console.warn(`[generate:cleanup] danglingRelationshipsRemoved=${dangling.count} samples=${dangling.samples.join(",")}`);
+  }
+  if (removedUnreferencedMediaParts.count > 0) {
+    console.warn(`[generate:cleanup] unreferencedMediaPartsRemoved=${removedUnreferencedMediaParts.count} samples=${removedUnreferencedMediaParts.samples.join(",")}`);
   }
   await writeFile(outPath, await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE", compressionOptions: { level: 6 } }));
 }
@@ -480,7 +488,7 @@ function nativeSvgRelationshipId(raw: string): string | undefined {
 
 export function embedNativeSvgInPictureXml(raw: string, svgRelId: string): string {
   const extension = `<a:ext uri="${SVG_EXTENSION_URI}"><asvg:svgBlip xmlns:asvg="${SVG_NAMESPACE}" r:embed="${svgRelId}"/></a:ext>`;
-  return raw.replace(/<a:blip\b[^>]*(?:\/>|>[\s\S]*?<\/a:blip>)/, (original) => {
+  return rewritePictureBlip(raw, (original) => {
     let blip = original.replace(/^(<a:blip\b[^>]*?)\s+r:embed="[^"]*"/, "$1");
     if (/<asvg:svgBlip\b/.test(blip)) {
       return blip.replace(/(<asvg:svgBlip\b[^>]*\br:embed=")[^"]+("?)/, `$1${svgRelId}$2`);
@@ -492,17 +500,26 @@ export function embedNativeSvgInPictureXml(raw: string, svgRelId: string): strin
 }
 
 export function removeNativeSvgFromPictureXml(raw: string, rasterRelId?: string): string {
-  return raw.replace(/<a:blip\b[^>]*(?:\/>|>[\s\S]*?<\/a:blip>)/, (original) => {
+  return rewritePictureBlip(raw, (original) => {
     let blip = original
       .replace(/<a:ext\b[^>]*>(?:(?!<\/a:ext>)[\s\S])*?<asvg:svgBlip\b[^>]*\/>(?:(?!<\/a:ext>)[\s\S])*?<\/a:ext>/g, "")
       .replace(/<a:extLst\b[^>]*>\s*<\/a:extLst>/g, "");
     if (!rasterRelId) return blip;
-    const openingTag = blip.match(/^<a:blip\b[^>]*\/?\>/)?.[0] ?? "";
+    const openingTag = blip.match(/<a:blip\b[^>]*\/?\>/)?.[0] ?? "";
     if (/\br:embed="/.test(openingTag)) {
-      return blip.replace(/^(<a:blip\b[^>]*\br:embed=")[^"]+("?)/, `$1${rasterRelId}$2`);
+      return blip.replace(/(<a:blip\b[^>]*\br:embed=")[^"]+("?)/, `$1${rasterRelId}$2`);
     }
-    return blip.replace(/^<a:blip\b/, `<a:blip r:embed="${rasterRelId}"`);
+    return blip.replace(/<a:blip\b/, `<a:blip r:embed="${rasterRelId}"`);
   });
+}
+
+function rewritePictureBlip(raw: string, transform: (blip: string) => string): string {
+  const blipPattern = /<a:blip\b[^>]*(?:\/>|>(?:(?!<\/a:blip>)[\s\S])*?<\/a:blip>)/;
+  const fillPattern = /<([pa]):blipFill\b[^>]*>(?:(?!<\/\1:blipFill>)[\s\S])*?<\/\1:blipFill>/;
+  if (fillPattern.test(raw)) {
+    return raw.replace(fillPattern, (fill) => fill.replace(blipPattern, transform));
+  }
+  return raw.replace(blipPattern, transform);
 }
 
 export function centerCropRasterPictureXml(raw: string, sourceWidth: number, sourceHeight: number, targetBox?: Box): string {
@@ -522,7 +539,7 @@ export function centerCropRasterPictureXml(raw: string, sourceWidth: number, sou
     ? `<a:srcRect l="${left}" t="${top}" r="${right}" b="${bottom}"/>`
     : "";
   const stretch = "<a:stretch><a:fillRect/></a:stretch>";
-  return raw.replace(/(<p:blipFill\b[^>]*>)([\s\S]*?)(<\/p:blipFill>)/, (_full, open: string, body: string, close: string) => {
+  return raw.replace(/(<([pa]):blipFill\b[^>]*>)([\s\S]*?)(<\/\2:blipFill>)/, (_full, open: string, _prefix: string, body: string, close: string) => {
     const cleaned = body
       .replace(/<a:srcRect\b[^>]*(?:\/>|>[\s\S]*?<\/a:srcRect>)/g, "")
       .replace(/<a:stretch\b[^>]*>[\s\S]*?<\/a:stretch>/g, "")
@@ -595,6 +612,57 @@ async function outputSlidePaths(zip: Awaited<ReturnType<typeof readPptx>>): Prom
   if (!presentationXml || !relsXml) throw new Error("输出 PPTX 缺少 presentation parts");
   const targets = new Map(parseRelationships(relsXml).filter((rel) => rel.type.endsWith("/slide")).map((rel) => [rel.id, resolveRelationshipTarget("ppt/presentation.xml", rel.target)]));
   return parsePresentationSlideRelIds(presentationXml).map((relId) => targets.get(relId)).filter((value): value is string => Boolean(value));
+}
+
+export async function removeUnreferencedSlideParts(
+  zip: Awaited<ReturnType<typeof readPptx>>,
+  referencedSlidePaths: readonly string[],
+): Promise<number> {
+  const referenced = new Set(referencedSlidePaths);
+  const removedPaths = Object.keys(zip.files)
+    .filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name) && !referenced.has(name))
+    .sort();
+  for (const slidePath of removedPaths) {
+    zip.remove(slidePath);
+    zip.remove(relationshipPartForOwner(slidePath));
+  }
+  const contentTypes = zip.file("[Content_Types].xml");
+  if (contentTypes && removedPaths.length) {
+    let xml = await contentTypes.async("string");
+    for (const slidePath of removedPaths) {
+      xml = xml.replace(new RegExp(`<Override\\b[^>]*PartName="/${escapeRegExp(slidePath)}"[^>]*/>`, "g"), "");
+    }
+    zip.file("[Content_Types].xml", xml);
+  }
+  return removedPaths.length;
+}
+
+export async function removeUnreferencedMediaParts(
+  zip: Awaited<ReturnType<typeof readPptx>>,
+): Promise<{ count: number; samples: string[] }> {
+  const referenced = new Set<string>();
+  for (const relsPath of Object.keys(zip.files).filter((name) => name.endsWith(".rels"))) {
+    const relFile = zip.file(relsPath);
+    if (!relFile) continue;
+    const ownerPart = ownerPartForRelationshipPart(relsPath);
+    for (const relationship of parseRelationships(await relFile.async("string"))) {
+      if (relationship.targetMode === "External") continue;
+      referenced.add(resolveRelationshipTarget(ownerPart, relationship.target));
+    }
+  }
+  const removedPaths = Object.keys(zip.files)
+    .filter((name) => /^ppt\/media\/[^/]+$/.test(name) && !referenced.has(name))
+    .sort();
+  for (const mediaPath of removedPaths) zip.remove(mediaPath);
+  const contentTypes = zip.file("[Content_Types].xml");
+  if (contentTypes && removedPaths.length) {
+    let xml = await contentTypes.async("string");
+    for (const mediaPath of removedPaths) {
+      xml = xml.replace(new RegExp(`<Override\\b[^>]*PartName="/${escapeRegExp(mediaPath)}"[^>]*/>`, "g"), "");
+    }
+    zip.file("[Content_Types].xml", xml);
+  }
+  return { count: removedPaths.length, samples: removedPaths.slice(0, 10) };
 }
 
 async function removeSpeakerNotes(zip: Awaited<ReturnType<typeof readPptx>>): Promise<number> {

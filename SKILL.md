@@ -93,6 +93,7 @@ npm run generate -- \
 - 同一固定或变长列表的每个 `icon_n` 以第一项同名图标槽位为标准，取第一项宽高较短边作为统一边长，将后续图标框改为相同正方形并保持各自中心点不变。
 - 光栅图片按真实宽高居中裁剪填充目标图片框：保持模板图片框的位置、尺寸和形状，不拉伸、不留白；宽图对称裁左右，长图对称裁上下。
 - 将图片写入 PPTX 本地媒体包；SVG 以 Office 2019+ 原生 `asvg:svgBlip` 单 SVG 关系写入，不添加透明 PNG fallback、不栅格化、不依赖操作系统转换器。将 SVG 的 `currentColor` 物化为显式颜色：图标中心下方可确认是白色或近白色填充时使用深灰 `#404040`，其他背景或无法确认时使用白色 `#FFFFFF`。
+- 保持 `pptx-automizer@0.8.2` 的内置 `cleanup` 关闭，避开其在未解析 SVG fallback 关系上解引用 `undefined` 的崩溃；由生成器后处理确定性删除未引用 slide parts、relationships 和媒体。
 - 替换 icon 时只保留模板槽位的变换信息（位置、尺寸、旋转和翻转），将节点重建为无填充、无线条的矩形图片；不得继承模板原 icon 的 `custGeom`、填充、线条、阴影或其他效果，否则新 SVG 可能仍呈现原模板图标的外观。
 - 每个被替换的图片或 icon 节点创建独立 image relationship，不复用或重定向模板已有的共享 `rId`；整页替换完成后统一清理未引用图片关系。
 - 删除备注、悬空关系、孤立关系，以及 `ppt/_rels/presentation.xml.rels` 中 Office 不允许的 `Presentation -> SlideLayout` 显式关系。
@@ -135,6 +136,7 @@ npm run verify -- --pptx "$OUTPUT_PPTX"
 - `ppt/presentation.xml` 不得直接关联 SlideLayout；页面布局必须经由 SlideMaster/Slide 的合法关系引用。
 - 所有 relationship ID 必须匹配 `^rId\d+$`；PowerPoint 会将 `rId*-created` 视为需修复的包。
 - 图片或 icon 节点替换不得重定向共享 relationship；最终 slide relationships 中不得残留未被同页 XML 引用的 image relationship。
+- `ppt/media` 不得保留未被任何有效内部 relationship 引用的孤立媒体；生成器后处理必须删除，程序性验证必须拒绝。
 - 所有动画目标 `spid` 必须能在同页 `p:cNvPr/@id` 中找到；悬空引用必须在生成阶段清理。
 - 要求每个动态列表 Item 都有动画时，模板必须预制到声明的最大 Group 数并逐组配置动画；生成器新复制出的超出预制数量的 Group 不会自动继承 PowerPoint 动画。
 - slide `p14:creationId` 和 shape `a16:creationId` 在整份输出 Deck 中不得重复。

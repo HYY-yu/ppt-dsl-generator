@@ -20,6 +20,7 @@ export interface PackageQaResult {
   duplicateShapeCreationIds: string[];
   invalidAnimationTargets: string[];
   unreferencedImageRelationships: string[];
+  unreferencedMediaParts: string[];
   missingImageRelationships: string[];
   nativeSvgEmbeddings: number;
   invalidSvgEmbeddings: string[];
@@ -40,6 +41,7 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
   const duplicateShapeCreationIds: string[] = [];
   const invalidAnimationTargets: string[] = [];
   const unreferencedImageRelationships: string[] = [];
+  const referencedPartPaths = new Set<string>();
   const missingImageRelationships: string[] = [];
   const invalidSvgEmbeddings: string[] = [];
   let nativeSvgEmbeddings = 0;
@@ -77,9 +79,13 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
       }
       if (relationship.targetMode === "External") continue;
       const target = resolveRelationshipTarget(ownerPart, relationship.target);
+      referencedPartPaths.add(target);
       if (!zip.file(target)) danglingRelationships.push(`${relsPath} -> ${relationship.target}`);
     }
   }
+  const unreferencedMediaParts = allPaths
+    .filter((name) => /^ppt\/media\/[^/]+$/.test(name) && !referencedPartPaths.has(name))
+    .sort();
 
   const slidePaths = await readOrderedSlidePaths(zip);
   const seenSlideCreationIds = new Map<string, string>();
@@ -124,7 +130,7 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
       const target = resolveRelationshipTarget(slidePath, relationship.target);
       if (!zip.file(target)) missingImageRelationships.push(`${slidePath}: ${relId} -> ${relationship.target}`);
     }
-    for (const match of slideXml.matchAll(/<a:blip\b[^>]*>[\s\S]*?<asvg:svgBlip\b[^>]*r:embed="([^"]+)"[^>]*\/>[\s\S]*?<\/a:blip>/g)) {
+    for (const match of slideXml.matchAll(/<a:blip\b(?![^>]*\/>)[^>]*>(?:(?!<a:blip\b|<\/a:blip>)[\s\S])*?<asvg:svgBlip\b[^>]*r:embed="([^"]+)"[^>]*\/>(?:(?!<a:blip\b|<\/a:blip>)[\s\S])*?<\/a:blip>/g)) {
       nativeSvgEmbeddings += 1;
       const block = match[0];
       const svgRelId = match[1];
@@ -161,6 +167,7 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
   if (duplicateShapeCreationIds.length) errors.push(`duplicate shape creation IDs: ${duplicateShapeCreationIds.length}`);
   if (invalidAnimationTargets.length) errors.push(`invalid animation targets: ${invalidAnimationTargets.length}`);
   if (unreferencedImageRelationships.length) errors.push(`unreferenced image relationships: ${unreferencedImageRelationships.length}`);
+  if (unreferencedMediaParts.length) errors.push(`unreferenced media parts: ${unreferencedMediaParts.length}`);
   if (missingImageRelationships.length) errors.push(`missing image relationships: ${missingImageRelationships.length}`);
   if (invalidSvgEmbeddings.length) errors.push(`invalid native SVG embeddings: ${invalidSvgEmbeddings.length}`);
   if (emptyPlaceholders.length) errors.push(`empty structural placeholders: ${emptyPlaceholders.length}`);
@@ -178,6 +185,7 @@ export async function inspectPptxPackage(zip: JSZip): Promise<PackageQaResult> {
     duplicateShapeCreationIds,
     invalidAnimationTargets,
     unreferencedImageRelationships,
+    unreferencedMediaParts,
     missingImageRelationships,
     nativeSvgEmbeddings,
     invalidSvgEmbeddings,

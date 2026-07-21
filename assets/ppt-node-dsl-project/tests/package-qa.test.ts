@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import JSZip from "jszip";
-import { addImageRelationship, normalizeRelationshipIds, regenerateDuplicateCreationIds, removeInvalidAnimationTimelines, removeInvalidPresentationRelationships, removeUnreferencedSlideImageRelationships } from "../src/pptx/generate.js";
+import { addImageRelationship, normalizeRelationshipIds, regenerateDuplicateCreationIds, removeInvalidAnimationTimelines, removeInvalidPresentationRelationships, removeUnreferencedMediaParts, removeUnreferencedSlideImageRelationships, removeUnreferencedSlideParts } from "../src/pptx/generate.js";
 import { inspectPptxPackage } from "../src/pptx/package-qa.js";
 
 function buildPackage(): JSZip {
@@ -66,6 +66,15 @@ function nativeSvgPackage(withCustomGeometry: boolean): JSZip {
   zip.file("ppt/slides/slide1.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/></p:nvGrpSpPr><p:grpSpPr/><p:pic><p:blipFill><a:blip><a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="rId2"/></a:ext></a:extLst></a:blip></p:blipFill>${shapeProperties}</p:pic></p:spTree></p:cSld></p:sld>`);
   zip.file("ppt/slides/_rels/slide1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/icon.svg"/></Relationships>`);
   zip.file("ppt/media/icon.svg", `<svg xmlns="http://www.w3.org/2000/svg"/>`);
+  return zip;
+}
+
+function mixedRasterAndNativeSvgPackage(): JSZip {
+  const zip = nativeSvgPackage(false);
+  const shapeProperties = `<p:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>`;
+  zip.file("ppt/slides/slide1.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><p:cSld><p:spTree><p:nvGrpSpPr><p:cNvPr id="1" name=""/></p:nvGrpSpPr><p:grpSpPr/><p:pic><p:blipFill><a:blip r:embed="rId3"/></p:blipFill>${shapeProperties}</p:pic><p:pic><p:blipFill><a:blip><a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main" r:embed="rId2"/></a:ext></a:extLst></a:blip></p:blipFill>${shapeProperties}</p:pic></p:spTree></p:cSld></p:sld>`);
+  zip.file("ppt/slides/_rels/slide1.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/icon.svg"/><Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/photo.png"/></Relationships>`);
+  zip.file("ppt/media/photo.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   return zip;
 }
 
@@ -174,6 +183,13 @@ test("package QA accepts native SVG pictures with clean rectangular geometry", a
   assert.deepEqual(result.invalidSvgEmbeddings, []);
 });
 
+test("package QA does not cross a raster blip boundary when finding native SVG", async () => {
+  const result = await inspectPptxPackage(mixedRasterAndNativeSvgPackage());
+  assert.equal(result.nativeSvgEmbeddings, 1);
+  assert.deepEqual(result.invalidSvgEmbeddings, []);
+  assert.deepEqual(result.errors, []);
+});
+
 test("package QA rejects native SVG pictures that retain template custom geometry", async () => {
   const result = await inspectPptxPackage(nativeSvgPackage(true));
   assert.deepEqual(result.invalidSvgEmbeddings, ["ppt/slides/slide1.xml: native SVG picture must not retain custom geometry"]);
@@ -198,4 +214,35 @@ test("generation allocates independent image relationships and cleans only unuse
   assert.doesNotMatch(relsXml ?? "", /Id="rId3"|Id="rId4"/);
   assert.match(relsXml ?? "", /Id="rId5"/);
   assert.match(relsXml ?? "", /Id="rId6"/);
+});
+
+test("generation removes slide parts left behind when Automizer cleanup is disabled", async () => {
+  const zip = buildPackage();
+  zip.file("ppt/slides/slide2.xml", `<p:sld xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"/>`);
+  zip.file("ppt/slides/_rels/slide2.xml.rels", `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"/>`);
+  const contentTypes = await zip.file("[Content_Types].xml")?.async("string");
+  zip.file("[Content_Types].xml", (contentTypes ?? "").replace("</Types>", `<Override PartName="/ppt/slides/slide2.xml" ContentType="application/vnd.openxmlformats-officedocument.presentationml.slide+xml"/></Types>`));
+  const removed = await removeUnreferencedSlideParts(zip, ["ppt/slides/slide1.xml"]);
+  assert.equal(removed, 1);
+  assert.equal(zip.file("ppt/slides/slide2.xml"), null);
+  assert.equal(zip.file("ppt/slides/_rels/slide2.xml.rels"), null);
+  assert.doesNotMatch(await zip.file("[Content_Types].xml")!.async("string"), /slide2\.xml/);
+});
+
+test("generation removes media parts that no relationship references", async () => {
+  const zip = nativeSvgPackage(false);
+  zip.file("ppt/media/orphan.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const cleanup = await removeUnreferencedMediaParts(zip);
+  assert.equal(cleanup.count, 1);
+  assert.deepEqual(cleanup.samples, ["ppt/media/orphan.png"]);
+  assert.ok(zip.file("ppt/media/icon.svg"));
+  assert.equal(zip.file("ppt/media/orphan.png"), null);
+});
+
+test("package QA rejects media parts that no relationship references", async () => {
+  const zip = nativeSvgPackage(false);
+  zip.file("ppt/media/orphan.png", Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  const result = await inspectPptxPackage(zip);
+  assert.deepEqual(result.unreferencedMediaParts, ["ppt/media/orphan.png"]);
+  assert.match(result.errors.join("\n"), /unreferenced media parts: 1/);
 });

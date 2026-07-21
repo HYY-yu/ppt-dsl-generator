@@ -42,6 +42,20 @@ test("removes the native SVG extension when replacing it with a raster image", (
   assert.match(updated, /a14:useLocalDpi/);
 });
 
+test("updates the raster relationship inside a wrapped picture node", () => {
+  const wrapped = `<p:pic><p:nvPicPr/><p:blipFill><a:blip r:embed="rId9"><a:extLst><a:ext uri="svg"><asvg:svgBlip r:embed="rId8"/></a:ext></a:extLst></a:blip><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr/></p:pic>`;
+  const updated = removeNativeSvgFromPictureXml(wrapped, "rId5");
+  assert.match(updated, /<p:pic>[\s\S]*?<a:blip r:embed="rId5">/);
+  assert.doesNotMatch(updated, /r:embed="rId9"|asvg:svgBlip/);
+});
+
+test("updates the raster relationship inside a shape a:blipFill node", () => {
+  const wrapped = `<p:sp><p:spPr><a:blipFill><a:blip r:embed="rId9"/></a:blipFill></p:spPr></p:sp>`;
+  const updated = removeNativeSvgFromPictureXml(wrapped, "rId5");
+  assert.match(updated, /<a:blip r:embed="rId5"\/>/);
+  assert.doesNotMatch(updated, /r:embed="rId9"/);
+});
+
 test("rebuilds icon pictures without inheriting the template icon geometry", () => {
   const source = {
     id: "31",

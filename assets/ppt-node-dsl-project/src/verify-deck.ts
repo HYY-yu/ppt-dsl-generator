@@ -33,6 +33,7 @@ const report = {
   duplicateShapeCreationIds: packageResult.duplicateShapeCreationIds,
   invalidAnimationTargets: packageResult.invalidAnimationTargets,
   unreferencedImageRelationships: packageResult.unreferencedImageRelationships,
+  unreferencedMediaParts: packageResult.unreferencedMediaParts,
   nativeSvgEmbeddings: packageResult.nativeSvgEmbeddings,
   invalidSvgEmbeddings: packageResult.invalidSvgEmbeddings,
   unreferencedSlideParts,

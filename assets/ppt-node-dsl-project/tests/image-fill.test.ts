@@ -25,6 +25,13 @@ test("keeps same-aspect rasters uncropped while using stretch fill", () => {
   assert.match(xml, /<a:stretch><a:fillRect\/><\/a:stretch>/);
 });
 
+test("center-crops raster fills stored in shape a:blipFill nodes", () => {
+  const shape = `<p:sp><p:spPr><a:blipFill><a:blip r:embed="rId1"/><a:srcRect l="1200"/><a:tile/></a:blipFill></p:spPr></p:sp>`;
+  const xml = centerCropRasterPictureXml(shape, 1024, 1024, wideBox);
+  assert.match(xml, /<a:blip r:embed="rId1"\/><a:srcRect l="0" t="25000" r="0" b="25000"\/><a:stretch><a:fillRect\/><\/a:stretch>/);
+  assert.doesNotMatch(xml, /<a:tile\b|l="1200"/);
+});
+
 test("reads PNG, GIF, and JPEG dimensions without an image dependency", () => {
   const png = Buffer.alloc(24);
   png.write("\x89PNG", 0, "binary");

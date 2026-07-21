@@ -40,15 +40,18 @@
 - 不存在 notes parts、notes relationships 或 notes content types。
 - 不存在悬空内部关系、孤立关系部件或缺失图片关系。
 - 每个被替换的图片/icon 节点使用独立 image relationship；不存在未被同页 XML 引用的 image relationship。
+- `ppt/media` 中每个媒体文件至少被一个有效内部 relationship 引用；关闭 Automizer 内置 cleanup 后留下的孤立媒体由生成器后处理删除，并由 `verify` 拒绝回归。
 - `ppt/_rels/presentation.xml.rels` 不存在指向 SlideLayout 的显式关系；SlideLayout 只能通过 SlideMaster/Slide 的合法关系链使用。
 - 所有 `.rels` 中的 relationship ID 必须匹配 `^rId\d+$`；生成阶段必须规范化 `rId*-created` 并同步 owner XML 引用。
 - 所有 `<p:timing>` 中的动画目标 `spid` 必须引用同页现存形状；动态列表删减造成悬空引用时，生成阶段只裁剪已删除 Item 对应的动画分支并保留同页有效动画，只有无法安全修复或已无有效目标时才删除整页 timing block。
 - 所有 slide `p14:creationId` 与 shape `a16:creationId` 在整份 Deck 中唯一；模板页或 Group 克隆后必须重新分配重复 ID。
 - 原生 SVG 必须包含 `image/svg+xml` content type、包内 SVG 媒体和唯一 `asvg:svgBlip` 关系；`a:blip` 不得再声明透明 PNG fallback 关系。
+- 同页普通光栅图片和原生 SVG 必须按各自独立的 `<a:blip>` 校验；不得跨自闭合 `<a:blip .../>` 或相邻图片边界推断 SVG fallback。
 - 原生 SVG icon 所在 `p:pic/p:spPr` 必须是干净的矩形图片几何；不得保留模板节点的 `a:custGeom`，生成阶段必须移除模板 icon 的填充、线条与效果，仅保留位置、尺寸、旋转和翻转信息。
 - 原生 SVG 不得将 `currentColor` 留到 PowerPoint 运行时解析；生成阶段必须按模板背景物化为显式颜色。白色/近白色背景使用 `#404040`，其他或无法确认的背景使用 `#FFFFFF`。
 - 同一列表的每个 `icon_n` 输出框必须使用第一项同名槽位的较短边形成统一正方形，且调整前后中心点保持不变。
 - 光栅图片替换后保留模板图片框几何和形状；按源图与目标框比例生成对称 `a:srcRect` 并使用 `a:stretch/a:fillRect` 居中裁剪填充，不残留 `a:tile` 或旧裁剪参数。
+- 光栅关系替换必须在目标节点自己的 `p:blipFill` 或 `a:blipFill` 内更新 `r:embed`，不得因节点外层是 `p:pic`/`p:sp` 而保留模板关系，也不得改写同页其他图片的关系。
 - 最终 slide XML 不含以 `@` 开头的选择窗格名称。
 - 所有媒体文件位于 PPTX 包内，不依赖外部 URL。
 
