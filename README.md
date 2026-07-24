@@ -1,5 +1,15 @@
 # PPT 节点 DSL 生成器
 
+<div align="center">
+  <a href="https://www.youtube.com/watch?v=nc9QSwV8cKk&t=2s">
+    <img src="https://i.ytimg.com/vi/nc9QSwV8cKk/hqdefault.jpg" width="720" alt="PPT 节点 DSL 生成器教学视频">
+  </a>
+  <p>
+    <strong>教学视频：快速上手 PPT 节点 DSL 生成器</strong><br>
+    点击封面，从 00:02 开始观看完整教程。
+  </p>
+</div>
+
 把 PowerPoint 模板变成一个受约束的生成系统：在 PowerPoint 选择窗格中用 DSL 标记可编辑节点，编译出 Manifest，再用结构化 `DeckInput` 精确替换文本、图片、图标、序号和列表。
 
 项目同时包含可安装的 Codex Skill 与独立的 Node.js/TypeScript 命令行工具。生成过程保留原模板页面、母版、布局和未标记节点，不重新绘制页面。
@@ -198,3 +208,15 @@ npm test
 ## 许可证
 
 本项目使用 [MIT License](LICENSE)。第三方依赖及示例中引用的外部素材仍适用各自许可证。
+
+---
+
+<div align="center">
+  <h2>从文章到 PPT，只需一步</h2>
+  <p>
+    此开源项目已经被集成到 <strong>JoyfulWords</strong>，可以一键把文章转成 PPT。
+  </p>
+  <p>
+    <a href="https://joyword.link"><strong>前往 JoyfulWords，开始创作 →</strong></a>
+  </p>
+</div>
