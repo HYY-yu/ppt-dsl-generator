@@ -1,12 +1,12 @@
 # PPT 节点 DSL 生成器
 
 <div align="center">
-  <a href="https://www.youtube.com/watch?v=nc9QSwV8cKk&t=2s">
+  <a href="https://www.youtube.com/watch?v=nc9QSwV8cKk">
     <img src="https://i.ytimg.com/vi/nc9QSwV8cKk/hqdefault.jpg" width="720" alt="PPT 节点 DSL 生成器教学视频">
   </a>
   <p>
     <strong>教学视频：快速上手 PPT 节点 DSL 生成器</strong><br>
-    点击封面，从 00:02 开始观看完整教程。
+    点击封面开始观看完整教程。
   </p>
 </div>
 
