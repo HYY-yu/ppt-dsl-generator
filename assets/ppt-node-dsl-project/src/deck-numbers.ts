@@ -38,7 +38,7 @@ function cloneDeckInput(input: DeckInput): DeckInput {
 }
 
 export function formatDeterministicNumber(value: NodeValue, width = 1): string {
-  const raw = typeof value === "object" ? value.path : String(value);
+  const raw = typeof value === "object" && value !== null && "path" in value ? value.path : String(value);
   const numeric = Number(raw);
   return Number.isFinite(numeric) ? String(numeric).padStart(width, "0") : raw;
 }

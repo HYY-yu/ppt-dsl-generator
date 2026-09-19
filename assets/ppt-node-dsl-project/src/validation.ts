@@ -1,6 +1,8 @@
+import { validateDataValue, validatePalette } from "./pptx/data-components.js";
 import { access } from "node:fs/promises";
 import path from "node:path";
-import type { ComponentManifest, DeckInput, NodeValue, TemplateManifest } from "./types.js";
+import type { ComponentManifest, DeckInput, NodeValue, RichTextValue, TemplateManifest } from "./types.js";
+import { componentSupportsRichText, isRichTextValue, plainTextFromValue, RICH_TEXT_MAX_PARAGRAPHS, RICH_TEXT_MAX_RUNS_PER_PARAGRAPH } from "./rich-text.js";
 
 export async function validateDeckInput(manifest: TemplateManifest, input: DeckInput): Promise<string[]> {
   return validateDeck(manifest, input, false);
@@ -12,6 +14,10 @@ export async function validateDeckContent(manifest: TemplateManifest, input: Dec
 
 async function validateDeck(manifest: TemplateManifest, input: DeckInput, contentOnly: boolean): Promise<string[]> {
   const errors: string[] = [];
+  if (input.palette !== undefined) {
+    if (contentOnly) errors.push("内容草稿不允许 palette；配色由确定性流程绑定");
+    else errors.push(...validatePalette(input.palette));
+  }
   if (!Array.isArray(input.slides) || !input.slides.length) return ["slides 必须是非空数组"];
   for (let slideIndex = 0; slideIndex < input.slides.length; slideIndex += 1) {
     const inputSlide = input.slides[slideIndex];
@@ -20,7 +26,7 @@ async function validateDeck(manifest: TemplateManifest, input: DeckInput, conten
     if (template.pageType !== "章节过渡页" && template.nodes.some((component) => component.kind === "number")) {
       errors.push(`${inputSlide.templateId} 只有章节过渡页允许页面级序号节点`);
     }
-    const nodeContracts = contentOnly ? template.nodes.filter((component) => component.kind === "text") : template.nodes;
+    const nodeContracts = contentOnly ? template.nodes.filter((component) => ["text", "table", "chart"].includes(component.kind)) : template.nodes;
     const allowedNodes = new Set(nodeContracts.map((node) => node.key));
     for (const key of Object.keys(inputSlide.nodes ?? {})) if (!allowedNodes.has(key)) errors.push(`${inputSlide.templateId}.nodes 不允许字段: ${key}`);
     for (const component of nodeContracts) {
@@ -120,8 +126,9 @@ function validateDirectoryTransitionContract(manifest: TemplateManifest, input: 
 }
 
 async function validateValue(component: ComponentManifest, value: NodeValue, label: string, errors: string[]): Promise<void> {
+  if (component.kind === "table" || component.kind === "chart") { errors.push(...validateDataValue(component, value).map(e => `${label}: ${e}`)); return; }
   if (component.kind === "image" || component.kind === "icon") {
-    const source = typeof value === "object" ? value.path : String(value);
+    const source = typeof value === "object" && value !== null && "path" in value ? value.path : String(value);
     if (!source) { errors.push(`${label} 资源路径为空`); return; }
     const extension = path.extname(source).toLowerCase();
     const supported = component.kind === "icon" ? [".svg", ".png"] : [".svg", ".png", ".jpg", ".jpeg", ".gif"];
@@ -129,8 +136,20 @@ async function validateValue(component: ComponentManifest, value: NodeValue, lab
     try { await access(source); } catch { errors.push(`${label} 资源不存在: ${source}`); }
     return;
   }
-  const text = String(value);
-  if (component.kind === "text" && component.length) {
+  if (component.kind === "text") {
+    if (typeof value !== "string" && !isRichTextValue(value)) {
+      errors.push(`${label} 必须是纯文本字符串或合法富文本对象`);
+      return;
+    }
+    if (isRichTextValue(value)) {
+      if (!componentSupportsRichText(component)) {
+        errors.push(`${label} 富文本仅允许用于 maxLength >= 40 的长文本框`);
+        return;
+      }
+      if (!validateRichTextStructure(value, label, errors)) return;
+    }
+    if (!component.length) return;
+    const text = plainTextFromValue(value);
     const { length, hasInvalidCharacters } = meaningfulTextLength(text);
     if (hasInvalidCharacters) {
       errors.push(`${label} 包含不可见格式字符或非标准空白，按可见内容计长度 ${length}`);
@@ -138,6 +157,75 @@ async function validateValue(component: ComponentManifest, value: NodeValue, lab
     }
     if (length < component.length.min || length > component.length.max) errors.push(`${label} 长度 ${length} 不在 [${component.length.min}-${component.length.max}]`);
   }
+}
+
+function validateRichTextStructure(value: RichTextValue, label: string, errors: string[]): boolean {
+  let valid = true;
+  if (value.paragraphs.length < 1 || value.paragraphs.length > RICH_TEXT_MAX_PARAGRAPHS) {
+    errors.push(`${label}.paragraphs 项数 ${value.paragraphs.length} 不在 [1-${RICH_TEXT_MAX_PARAGRAPHS}]`);
+    valid = false;
+  }
+  (value.paragraphs as unknown[]).forEach((paragraph, paragraphIndex) => {
+    const paragraphLabel = `${label}.paragraphs[${paragraphIndex}]`;
+    if (typeof paragraph !== "object" || paragraph === null) {
+      errors.push(`${paragraphLabel} 必须是对象`);
+      valid = false;
+      return;
+    }
+    const paragraphRecord = paragraph as Record<string, unknown>;
+    const paragraphKeys = Object.keys(paragraphRecord);
+    for (const key of paragraphKeys) {
+      if (key !== "list" && key !== "runs") {
+        errors.push(`${paragraphLabel} 不允许字段: ${key}`);
+        valid = false;
+      }
+    }
+    if (!["none", "bullet", "number"].includes(String(paragraphRecord.list))) {
+      errors.push(`${paragraphLabel}.list 必须是 none、bullet 或 number`);
+      valid = false;
+    }
+    if (!Array.isArray(paragraphRecord.runs)) {
+      errors.push(`${paragraphLabel}.runs 必须是数组`);
+      valid = false;
+      return;
+    }
+    if (paragraphRecord.runs.length < 1 || paragraphRecord.runs.length > RICH_TEXT_MAX_RUNS_PER_PARAGRAPH) {
+      errors.push(`${paragraphLabel}.runs 项数 ${paragraphRecord.runs.length} 不在 [1-${RICH_TEXT_MAX_RUNS_PER_PARAGRAPH}]`);
+      valid = false;
+    }
+    paragraphRecord.runs.forEach((run: unknown, runIndex: number) => {
+      const runLabel = `${paragraphLabel}.runs[${runIndex}]`;
+      if (typeof run !== "object" || run === null) {
+        errors.push(`${runLabel} 必须是对象`);
+        valid = false;
+        return;
+      }
+      const runRecord = run as Record<string, unknown>;
+      const runKeys = Object.keys(runRecord);
+      for (const key of runKeys) {
+        if (key !== "text" && key !== "bold" && key !== "underline") {
+          errors.push(`${runLabel} 不允许字段: ${key}`);
+          valid = false;
+        }
+      }
+      if (typeof runRecord.text !== "string" || runRecord.text.length === 0) {
+        errors.push(`${runLabel}.text 必须是非空字符串`);
+        valid = false;
+      } else if (/[\r\n\t]/u.test(runRecord.text)) {
+        errors.push(`${runLabel}.text 不允许换行或 Tab；请拆成 paragraph`);
+        valid = false;
+      }
+      if (typeof runRecord.bold !== "boolean") {
+        errors.push(`${runLabel}.bold 必须是布尔值`);
+        valid = false;
+      }
+      if (typeof runRecord.underline !== "boolean") {
+        errors.push(`${runLabel}.underline 必须是布尔值`);
+        valid = false;
+      }
+    });
+  });
+  return valid;
 }
 
 export function meaningfulTextLength(text: string): { length: number; hasInvalidCharacters: boolean } {

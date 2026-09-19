@@ -168,3 +168,51 @@ test("content validation allows missing deterministic numbers and rejects non-te
   const nonTextErrors = await validateDeckContent(manifest, contentInput);
   assert.ok(nonTextErrors.some((error) => error.includes("nodes 不允许字段: number_1")));
 });
+
+test("rejects rich text in short fields", async () => {
+  const input: DeckInput = {
+    slides: [
+      { templateId: "directory", lists: { list_1: [{ text_1: { paragraphs: [{ list: "none", runs: [{ text: "章节", bold: true, underline: false }] }] } }] } },
+      { templateId: "transition", nodes: { text_1: "章节", number_1: 1 } },
+    ],
+  };
+  const errors = await validateDeckInput(manifest, input);
+  assert.ok(errors.some((error) => error.includes("富文本仅允许用于 maxLength >= 40")));
+});
+
+test("validates long rich text by visible text and rejects line breaks inside runs", async () => {
+  const longText: ComponentManifest = {
+    ...text,
+    rawDsl: "@文本[2-120]",
+    sampleContent: "包含关键结论和行动建议的长文本",
+    length: { min: 2, max: 120, fixed: false },
+  };
+  const longManifest: TemplateManifest = {
+    ...manifest,
+    slides: [
+      {
+        ...directory,
+        lists: [{ ...directory.lists[0], items: [{ itemIndex: 1, components: [longText] }], componentContract: [{ key: "text_1", kind: "text", ordinal: 1, sampleContent: longText.sampleContent, length: longText.length }] }],
+      },
+      { ...transition, nodes: [longText, number] },
+    ],
+  };
+  const rich = {
+    paragraphs: [
+      { list: "none" as const, runs: [{ text: "核心结论", bold: true, underline: false }, { text: "清晰可执行", bold: false, underline: false }] },
+      { list: "bullet" as const, runs: [{ text: "优先修复激活路径", bold: false, underline: true }] },
+    ],
+  };
+  const input: DeckInput = {
+    slides: [
+      { templateId: "directory", lists: { list_1: [{ text_1: rich }] } },
+      { templateId: "transition", nodes: { text_1: rich, number_1: 1 } },
+    ],
+  };
+  const errors = await validateDeckInput(longManifest, input);
+  assert.ok(!errors.some((error) => error.includes("富文本") || error.includes("长度") || error.includes("paragraphs")));
+
+  rich.paragraphs[0].runs[0].text = "核心\n结论";
+  const malformed = await validateDeckInput(longManifest, input);
+  assert.ok(malformed.some((error) => error.includes("请拆成 paragraph")));
+});

@@ -1,8 +1,8 @@
 import { parseComponentName, parseFixedListComponentName, parseGroupName } from "../dsl/parse.js";
-import type { Box } from "../types.js";
+import type { Box, RichTextListStyle, RichTextRunValue, RichTextValue } from "../types.js";
 
 export interface XmlNode {
-  type: "sp" | "pic" | "grpSp";
+  type: "sp" | "pic" | "grpSp" | "graphicFrame";
   start: number;
   end: number;
   raw: string;
@@ -20,7 +20,7 @@ interface OpenNode { type: XmlNode["type"]; start: number; children: XmlNode[] }
 export function parseSlideNodes(xml: string): XmlNode[] {
   const roots: XmlNode[] = [];
   const stack: OpenNode[] = [];
-  const token = /<(\/?)p:(sp|pic|grpSp)\b[^>]*>/g;
+  const token = /<(\/?)p:(sp|pic|grpSp|graphicFrame)\b[^>]*>/g;
   let match: RegExpExecArray | null;
   while ((match = token.exec(xml))) {
     const closing = match[1] === "/";
@@ -65,6 +65,91 @@ export function replaceTextInNode(raw: string, value: string): string {
     return "";
   });
   return raw.replace(bodyMatch[0], compactBody);
+}
+
+export function replaceRichTextInNode(raw: string, value: RichTextValue): string {
+  const bodyMatch = raw.match(/<p:txBody\b[\s\S]*?<\/p:txBody>/);
+  if (!bodyMatch) throw new Error("富文本节点缺少 p:txBody");
+  const paragraphs = [...bodyMatch[0].matchAll(/<a:p\b[\s\S]*?<\/a:p>/g)];
+  const target = paragraphs.find((match) => /<a:t(?:\s[^>]*)?>/.test(match[0])) ?? paragraphs[0];
+  if (!target) throw new Error("富文本节点缺少模板段落");
+
+  const templateParagraph = target[0];
+  const paragraphProperties = templateParagraph.match(/<a:pPr\b[\s\S]*?<\/a:pPr>|<a:pPr\b[^>]*\/>/)?.[0];
+  const runProperties = templateParagraph.match(/<a:rPr\b[\s\S]*?<\/a:rPr>|<a:rPr\b[^>]*\/>/)?.[0]
+    ?? paragraphProperties?.match(/<a:defRPr\b[\s\S]*?<\/a:defRPr>|<a:defRPr\b[^>]*\/>/)?.[0]
+    ?? templateParagraph.match(/<a:endParaRPr\b[\s\S]*?<\/a:endParaRPr>|<a:endParaRPr\b[^>]*\/>/)?.[0]
+    ?? "<a:rPr/>";
+  const endProperties = templateParagraph.match(/<a:endParaRPr\b[\s\S]*?<\/a:endParaRPr>|<a:endParaRPr\b[^>]*\/>/)?.[0] ?? "";
+
+  let orderedIndex = 0;
+  const generated = value.paragraphs.map((paragraph) => {
+    orderedIndex = paragraph.list === "number" ? orderedIndex + 1 : 0;
+    const pPr = buildParagraphProperties(paragraphProperties, paragraph.list, orderedIndex);
+    const runs = paragraph.runs.map((run) => buildTextRun(runProperties, run)).join("");
+    return `<a:p>${pPr}${runs}${endProperties}</a:p>`;
+  }).join("");
+
+  let kept = false;
+  const richBody = bodyMatch[0].replace(/<a:p\b[\s\S]*?<\/a:p>/g, (paragraph) => {
+    if (!kept && paragraph === templateParagraph) {
+      kept = true;
+      return generated;
+    }
+    return "";
+  });
+  return raw.replace(bodyMatch[0], richBody);
+}
+
+function buildTextRun(templateRunProperties: string, run: RichTextRunValue): string {
+  let properties = normalizeRunProperties(templateRunProperties)
+    .replace(/\s+b="[^"]*"/g, "")
+    .replace(/\s+u="[^"]*"/g, "");
+  if (run.bold) properties = setOpeningTagAttribute(properties, "b", "1");
+  if (run.underline) properties = setOpeningTagAttribute(properties, "u", "sng");
+  const preserve = /^\s|\s$/u.test(run.text) ? ' xml:space="preserve"' : "";
+  return `<a:r>${properties}<a:t${preserve}>${xmlEscape(run.text)}</a:t></a:r>`;
+}
+
+function normalizeRunProperties(value: string): string {
+  return value
+    .replace(/<a:(?:defRPr|endParaRPr)\b/, "<a:rPr")
+    .replace(/<\/a:(?:defRPr|endParaRPr)>/, "</a:rPr>");
+}
+
+function buildParagraphProperties(template: string | undefined, list: RichTextListStyle, orderedIndex: number): string {
+  let properties = template ?? "<a:pPr/>";
+  if (/\/>$/.test(properties)) properties = properties.replace(/\/>$/, "></a:pPr>");
+  for (const tag of ["buClrTx", "buClr", "buSzTx", "buSzPct", "buSzPts", "buFontTx", "buFont", "buNone", "buAutoNum", "buChar", "buBlip"]) {
+    properties = properties.replace(new RegExp(`<a:${tag}\\b[^>]*(?:\\/>|>[\\s\\S]*?<\\/a:${tag}>)`, "g"), "");
+  }
+  if (list !== "none") {
+    properties = setOpeningTagAttribute(properties, "marL", readOpeningTagAttribute(properties, "marL") ?? "342900");
+    properties = setOpeningTagAttribute(properties, "indent", readOpeningTagAttribute(properties, "indent") ?? "-285750");
+  }
+  const bullet = list === "bullet"
+    ? '<a:buChar char="•"/>'
+    : list === "number"
+      ? `<a:buAutoNum type="arabicPeriod" startAt="${orderedIndex}"/>`
+      : "<a:buNone/>";
+  const insertionPoint = properties.search(/<a:(?:tabLst|defRPr|extLst)\b|<\/a:pPr>/);
+  if (insertionPoint < 0) throw new Error("无法定位 a:pPr 的列表属性插入点");
+  return `${properties.slice(0, insertionPoint)}${bullet}${properties.slice(insertionPoint)}`;
+}
+
+function readOpeningTagAttribute(xml: string, name: string): string | undefined {
+  const opening = xml.match(/^<a:[^>]+>/)?.[0] ?? "";
+  return opening.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1];
+}
+
+function setOpeningTagAttribute(xml: string, name: string, value: string): string {
+  const opening = xml.match(/^<a:[^>]+>/)?.[0];
+  if (!opening) return xml;
+  const attribute = new RegExp(`\\s${name}="[^"]*"`);
+  const updated = attribute.test(opening)
+    ? opening.replace(attribute, ` ${name}="${xmlEscape(value)}"`)
+    : opening.replace(/\/?>>?$/, (ending) => ` ${name}="${xmlEscape(value)}"${ending}`);
+  return `${updated}${xml.slice(opening.length)}`;
 }
 
 function replaceTextRuns(raw: string, escaped: string): string {

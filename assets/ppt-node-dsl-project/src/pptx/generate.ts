@@ -1,3 +1,4 @@
+import { patchDataComponent, applyPalette } from "./data-components.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
@@ -8,7 +9,8 @@ import type { Box, ComponentManifest, DeckInput, ListItemManifest, ListManifest,
 import { assertValidDeckInput } from "../validation.js";
 import { assertManifestMatchesTemplate } from "../template-contract.js";
 import { bindDeterministicNumbers, formatDeterministicNumber } from "../deck-numbers.js";
-import { flattenNodes, maxShapeId, parseSlideNodes, reassignShapeIds, renameFirstNode, replaceNodeRaw, replaceTextInNode, setGroupBox, type XmlNode } from "./nodes.js";
+import { isRichTextValue } from "../rich-text.js";
+import { flattenNodes, maxShapeId, parseSlideNodes, reassignShapeIds, renameFirstNode, replaceNodeRaw, replaceRichTextInNode, replaceTextInNode, setGroupBox, type XmlNode } from "./nodes.js";
 import { readPptx } from "./read.js";
 import { ownerPartForRelationshipPart, parsePresentationSlideRelIds, parseRelationships, relationshipPartForOwner, resolveRelationshipTarget } from "./relationships.js";
 import { planDynamicListLayout } from "./layout.js";
@@ -71,9 +73,13 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
         ? await patchDynamicList(zip, slidePath, xml, list, items, () => ++mediaCounter)
         : await patchFixedList(zip, slidePath, xml, list, items, () => ++mediaCounter);
     }
+    for (const node of flattenNodes(parseSlideNodes(xml)).filter(n => n.name === "runtime-page-number")) {
+      xml = replaceNodeRaw(xml, node, replaceTextInNode(node.raw, String(slideIndex + 1).padStart(2, "0")));
+    }
     xml = cleanDslNames(xml);
     zip.file(slidePath, xml);
   }
+  if (input.palette) await applyPalette(zip, input.palette);
   const removedUnreferencedSlideParts = await removeUnreferencedSlideParts(zip, slidePaths);
   const removedUnreferencedImageRelationships = await removeUnreferencedSlideImageRelationships(zip);
   const removedNotesParts = await removeSpeakerNotes(zip);
@@ -276,11 +282,19 @@ async function patchComponentNode(
   iconSide?: number,
 ): Promise<string> {
   if (component.kind === "text" || component.kind === "number") {
+    if (component.kind === "text" && isRichTextValue(value)) {
+      const bulletParagraphs = value.paragraphs.filter((paragraph) => paragraph.list === "bullet").length;
+      const numberedParagraphs = value.paragraphs.filter((paragraph) => paragraph.list === "number").length;
+      const styledRuns = value.paragraphs.flatMap((paragraph) => paragraph.runs).filter((run) => run.bold || run.underline).length;
+      console.info(`[generate:rich-text] slide=${slidePath} component=${component.key} paragraphs=${value.paragraphs.length} bulletParagraphs=${bulletParagraphs} numberedParagraphs=${numberedParagraphs} styledRuns=${styledRuns}`);
+      return replaceNodeRaw(xml, node, replaceRichTextInNode(node.raw, value));
+    }
     const text = component.kind === "number" ? formatDeterministicNumber(value, component.numberWidth) : String(value);
     return replaceNodeRaw(xml, node, replaceTextInNode(node.raw, text));
   }
+  if (component.kind === "table" || component.kind === "chart") return patchDataComponent(zip, slidePath, xml, node, component, value);
   const targetNode = component.kind === "icon" && iconSide ? normalizeIconNodeBox(node, iconSide) : node;
-  const sourcePath = typeof value === "object" ? value.path : String(value);
+  const sourcePath = typeof value === "object" && value !== null && "path" in value ? value.path : String(value);
   const serial = nextMedia();
   if (path.extname(sourcePath).toLowerCase() === ".svg") {
     const colorDecision = component.kind === "icon"

@@ -95,3 +95,27 @@ test("builds a text-only draft schema while preserving list capacity", () => {
   assert.equal(slide.properties.lists.properties.list_1.minItems, 2);
   assert.equal(slide.properties.lists.properties.list_1.maxItems, 4);
 });
+
+test("offers structured rich text only for long text fields", () => {
+  const manifest = {
+    slides: [{
+      templateId: "content",
+      nodes: [
+        { key: "text_1", kind: "text", length: { min: 10, max: 120 } },
+        { key: "text_2", kind: "text", length: { min: 2, max: 20 } },
+      ],
+      lists: [],
+    }],
+  } as unknown as TemplateManifest;
+
+  const schema = buildDeckContentSchema(manifest) as any;
+  const properties = schema.properties.slides.items.anyOf[0].properties.nodes.properties;
+  const rich = properties.text_1.anyOf[1];
+  assert.equal(rich.type, "object");
+  assert.match(properties.text_1.description, /默认返回普通字符串/);
+  assert.match(properties.text_1.description, /不要输出 Markdown/);
+  assert.deepEqual(rich.properties.paragraphs.items.properties.list.enum, ["none", "bullet", "number"]);
+  assert.deepEqual(rich.properties.paragraphs.items.properties.runs.items.required, ["text", "bold", "underline"]);
+  assert.equal(properties.text_2.type, "string");
+  assert.equal(properties.text_2.anyOf, undefined);
+});

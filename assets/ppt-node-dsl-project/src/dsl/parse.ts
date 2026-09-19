@@ -38,9 +38,10 @@ export function parseFixedListComponentName(value: string): ParsedFixedListName 
 export function parseComponentName(value: string): ParsedComponentName | undefined {
   const raw = value;
   const normalized = normalizeDslName(value).replace(/\s/g, "").replace(/^@文本框/, "@文本");
-  const match = normalized.match(/^@(文本|图片|图标|序号)(?:-(\d+))?(?:\[(\d+)(?:-(\d+))?\])?$/);
+  const match = normalized.match(/^@(文本|图片|图标|序号|表格|图表)(?:-(\d+))?(?:\[(\d+)(?:-(\d+))?\])?$/);
   if (!match) return undefined;
-  const kind = ({ 文本: "text", 图片: "image", 图标: "icon", 序号: "number" } as const)[match[1] as "文本" | "图片" | "图标" | "序号"];
+  const kind = ({ 文本: "text", 图片: "image", 图标: "icon", 序号: "number", 表格: "table", 图表: "chart" } as const)[match[1] as "文本" | "图片" | "图标" | "序号" | "表格" | "图表"];
+  if ((kind === "table" || kind === "chart") && (match[2] || match[3])) return undefined;
   const suffix = match[2];
   return {
     raw,

@@ -1,3 +1,4 @@
+import { inspectDataComponent } from "./data-components.js";
 import type JSZip from "jszip";
 import { parseComponentName, parseFixedListComponentName, parseGroupName, parseNotes, type ParsedComponentName } from "../dsl/parse.js";
 import type { ComponentManifest, ListItemManifest, ListManifest, SlideManifest, TemplateManifest } from "../types.js";
@@ -75,7 +76,12 @@ async function analyzeSlide(
     if (!parsed) continue;
     const ordinal = (standaloneCounts.get(parsed.kind) ?? 0) + 1;
     standaloneCounts.set(parsed.kind, ordinal);
-    nodes.push(toComponent(node, `${parsed.kind}_${ordinal}`, ordinal, parsed, slideRels));
+    const component = toComponent(node, `${parsed.kind}_${ordinal}`, ordinal, parsed, slideRels);
+    if (parsed.kind === "table" || parsed.kind === "chart") {
+      try { Object.assign(component, await inspectDataComponent(zip, entry.slidePath, node, parsed.kind)); }
+      catch (error) { warnings.push(`ERROR: 第 ${entry.slideNumber} 页 shapeId=${node.id}: ${String(error)}`); }
+    }
+    nodes.push(component);
   }
 
   for (const node of allNodes.filter((candidate) => candidate.name.trim().startsWith("@"))) {
@@ -136,6 +142,7 @@ function buildDynamicItem(group: XmlNode, rels: Map<string, string>): ListItemMa
   const descendants = flattenNodes(group.children).filter((node) => parseComponentName(node.name));
   const components = descendants.map((node) => {
     const parsed = parseComponentName(node.name)!;
+    if (parsed.kind === "table" || parsed.kind === "chart") throw new Error("表格和图表暂只支持页面级节点");
     const ordinal = (counts.get(parsed.kind) ?? 0) + 1;
     counts.set(parsed.kind, ordinal);
     return toComponent(node, `${parsed.kind}_${ordinal}`, ordinal, parsed, rels);
@@ -161,6 +168,7 @@ function buildFixedList(
     const counts = new Map<string, number>();
     const components = itemNodes.map((node) => {
       const parsed = parseFixedListComponentName(node.name)!;
+      if (parsed.kind === "table" || parsed.kind === "chart") throw new Error("表格和图表暂只支持页面级节点");
       const ordinal = (counts.get(parsed.kind) ?? 0) + 1;
       counts.set(parsed.kind, ordinal);
       return toComponent(node, `${parsed.kind}_${ordinal}`, ordinal, parsed, rels);

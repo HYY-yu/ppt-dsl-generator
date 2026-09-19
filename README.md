@@ -10,7 +10,7 @@
   </p>
 </div>
 
-把 PowerPoint 模板变成一个受约束的生成系统：在 PowerPoint 选择窗格中用 DSL 标记可编辑节点，编译出 Manifest，再用结构化 `DeckInput` 精确替换文本、图片、图标、序号和列表。
+把 PowerPoint 模板变成一个受约束的生成系统：在 PowerPoint 选择窗格中用 DSL 标记可编辑节点，编译出 Manifest，再用结构化 `DeckInput` 精确替换文本、图片、图标、序号、原生表格、原生图表和列表。
 
 项目同时包含可安装的 Codex Skill 与独立的 Node.js/TypeScript 命令行工具。生成过程保留原模板页面、母版、布局和未标记节点，不重新绘制页面。
 
@@ -18,6 +18,9 @@
 
 - 编译选择窗格节点名与页面备注中的 DSL。
 - 支持普通文本、图片、图标、序号和固定列表。
+- 长文本槽位支持原生富文本段落、加粗、下划线与单层有序/无序列表，继承模板字体与固定几何。
+- 页面级 `@表格`、`@图表` 支持结构化数据填充；图表同步缓存、公式和内嵌 Excel 工作簿，重复页面的数据彼此独立。
+- 可选配色合同同步 Office 主题与原生图表；配色由调用方确定性绑定。
 - 支持以 PowerPoint Group 为 Item 边界的定长和变长列表；首组不声明范围时保持定长，声明范围时允许增删 Item。
 - 保留 Group 的交错布局合同，并统一同一列表中的图标槽位尺寸。
 - 光栅图片按真实宽高居中裁剪填充；SVG 以 Office 2019+ 原生单关系写入。
@@ -87,7 +90,7 @@ npm run compile-template -- \
 - `template-lint.json`
 - `template.lock.json`
 
-先校验仅包含文案与列表的内容草稿：
+先校验包含文案、页面级表格/图表数据与列表的内容草稿：
 
 ```bash
 DECK_CONTENT_DRAFT="/绝对路径/deck-content.json"
@@ -98,7 +101,7 @@ npm run validate-input -- \
   --content-only
 ```
 
-`--content-only` 仍校验整套页面结构、章节数量、列表容量和文本长度，并拒绝草稿主动携带序号、图片或图标。
+`--content-only` 仍校验整套页面结构、章节数量、列表容量和文本长度，同时校验表格/图表数据合同，并拒绝草稿主动携带序号、图片/图标路径或配色。
 
 再绑定图片和图标，并校验完整 `DeckInput`。页面级与列表级序号都可以继续省略，CLI 会在完整校验前确定性补齐：
 
@@ -135,7 +138,11 @@ npm run verify -- --pptx "$OUTPUT_PPTX"
 @图片-1
 @图标
 @序号-01
+@表格
+@图表
 ```
+
+`@表格`、`@图表` 仅用于页面级原生组件，不放入 Group/列表，也不附范围或编号。容量由模板读取；图表当前支持柱/条、折线、圆环，并要求内部 XLSX 工作簿。完整输入与限制见 [原生数据组件](references/native-data-components.md)。长文本格式见 [富文本合同](references/rich-text.md)，新模板发布与原生验收见 [模板接入验收](references/template-integration-qa.md)。
 
 固定列表：
 
