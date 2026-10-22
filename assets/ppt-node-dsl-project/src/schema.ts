@@ -116,7 +116,7 @@ function valueSchema(component: ComponentManifest): Record<string, unknown> {
   const semanticHint = sample
     ? { description: `模板示例内容：${sample}。仅用于提示该字段承载的内容类型，不得照抄，也不替代长度约束。` }
     : {};
-  if (component.kind === "image" || component.kind === "icon") {
+  if (component.kind === "image" || component.kind === "background" || component.kind === "icon") {
     return { ...semanticHint, anyOf: [{ type: "string", minLength: 1 }, { type: "object", required: ["path"], additionalProperties: false, properties: { path: { type: "string", minLength: 1 } } }] };
   }
   if (component.kind === "number") return { ...semanticHint, anyOf: [{ type: "integer", minimum: 0 }, { type: "string", minLength: 1 }] };

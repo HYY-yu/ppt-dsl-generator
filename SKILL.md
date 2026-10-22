@@ -21,6 +21,7 @@ description: 编译和使用在 PowerPoint 选择窗格节点名称中标记 DSL
 - `references/programmatic-gates.md`：无需人工视觉 QA 时仍不得绕过的程序 gate。生成和交付时读取。
 - `references/outline-workflow.md`：从用户需求和可用资料生成并循环确认大纲的职责边界。进入大纲阶段时读取；用户没有提供资料时也必须读取。
 
+- `references/shared-background.md`：`@背景` 页面级图片与整份 Deck 共享资源合同。模板带背景槽位时读取。
 - `references/native-data-components.md`：`@表格`、`@图表`、数据 JSON、原生工作簿同步和可选配色合同。处理数据组件时读取。
 - `references/template-integration-qa.md`：目录适配、文本边界、模板版本和分层验收。新模板接入或 runtime 能力发布时读取。
 
@@ -77,7 +78,7 @@ npm run validate-input -- --manifest "$MANIFEST" --input "$DECK_INPUT"
 
 使用 LLM 填充时读取 `references/rich-text.md`。文本合同保持向后兼容：普通文本仍是字符串；只有模板长度合同 `maxLength >= 40` 的长文本字段，`deck-content.schema.json` 和 `input.schema.json` 才额外允许结构化富文本对象。Agent 默认输出纯文本，仅在信息层级确实受益时使用富文本：关键结论或术语可少量加粗，极少量重点可加下划线，并列信息使用无序列表，步骤或优先级使用有序列表。标题、目录项、标签、数字和其他短文本不得使用富文本，也不得把 Markdown 标记或手写项目符号塞入纯字符串模拟格式。
 
-含数据组件时读取 `references/native-data-components.md`。标记为页面级 `@表格` / `@图表`，容量由原生组件读取；模型按来源填写数据，程序校验维度、系列、标签与有限数值。配色从既有设计解析结果确定性绑定，不能由模型选择。
+模板包含 `@背景` 时读取 `references/shared-background.md`，先校验内容草稿，再统一绑定背景。含数据组件时读取 `references/native-data-components.md`。标记为页面级 `@表格` / `@图表`，容量由原生组件读取；模型按来源填写数据，程序校验维度、系列、标签与有限数值。配色从既有设计解析结果确定性绑定，不能由模型选择。
 
 ### 5. 生成 PPTX
 
@@ -94,7 +95,8 @@ npm run generate -- \
 - 校验模板 SHA-256。
 - 拒绝缺少 `slideNumber`、`slidePath`、列表 `items` 或组件 locator 的精简 Manifest。
 - 使用原模板页面和母版。
-- 按 shapeId 精确替换普通节点与固定列表节点。
+- 按 `slidePath` 的物理 part 编号选择源页，再按 shapeId 精确替换普通节点与固定列表节点；不能把展示页序当成 `slideN.xml` 的编号。
+- `@背景` 只标记页面级图片；整份 Deck 的背景必须绑定同一个本地 PNG/JPEG 路径，并复用同一份内嵌媒体。背景由调用方确定性绑定，不能由内容模型生成路径。
 - 原生表格保持样式和区域，按合同缩减数据行；图表对每个输出页面独立复制 chart/XLSX，同步缓存、公式和工作簿，避免重复模板页互相覆盖。
 - 仅在显式提供 palette 且模板符合主题合同的情况下同步配色；精确命名的 `runtime-page-number` 填充实际页码。
 - 以 Group 为列表 Item 边界；无范围声明时保持定长，有范围声明时允许删除、复制并在原列表区域均匀布局。

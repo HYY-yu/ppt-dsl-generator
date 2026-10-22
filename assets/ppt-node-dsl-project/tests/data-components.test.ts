@@ -35,7 +35,7 @@ test('native markers parse graphicFrame and reject misleading length/suffix decl
 });
 test('inspect charts rejects unsupported types, external workbooks and missing chart relationship',async()=>{
  const {zip,node,c}=await fixture(); assert.deepEqual(c.chart,{type:'bar',series:1,minCategories:1,maxCategories:3,maxTextLength:24});
- zip.file('ppt/charts/chart1.xml',chartXml.replaceAll('barChart','pieChart'));
+ zip.file('ppt/charts/chart1.xml',chartXml.replaceAll('barChart','scatterChart'));
  await assert.rejects(inspectDataComponent(zip,'ppt/slides/slide1.xml',node,'chart'),/暂不支持/);
  zip.file('ppt/charts/chart1.xml',chartXml);
  zip.file('ppt/charts/_rels/chart1.xml.rels',relation('https://example.test/data.xlsx').replace('Target=','TargetMode="External" Target='));
@@ -84,4 +84,26 @@ test('palette preserves inverse text independently of background and rejects mal
  const p:Palette={primary:'#112233',onPrimary:'#FEFEFE',secondary:'#334455',background:'#F8F5FC',surface:'#FFFFFF',text:'#111111',mutedText:'#555555',border:'#DDDDDD',chart:['#112233','#334455','#556677']};
  await applyPalette(zip,p);assert.match(await zip.file('ppt/slides/slide1.xml')!.async('string'),/FEFEFE/);assert.match(await zip.file('ppt/theme/theme1.xml')!.async('string'),/112233/);
  assert.ok(validatePalette(null as unknown as Palette).length);assert.ok(validatePalette({...p,extra:'x'} as Palette).length);
+});
+
+test('replacement chart uses automatic axis intervals and keeps source bounds', async () => {
+ const {zip,xml,node,c}=await fixture();
+ const axis='<c:valAx><c:scaling><c:min val="0"/><c:max val="1000"/></c:scaling><c:majorUnit val="10"/><c:minorUnit val="2"></c:minorUnit></c:valAx>';
+ const original=chartXml.replace('</c:barChart>', '</c:barChart>'+axis);
+ zip.file('ppt/charts/chart1.xml',original);
+ await patchDataComponent(zip,'ppt/slides/slide1.xml',xml,node,c,{categories:['Before','After'],series:[{name:'P95',values:[940,410]}]});
+ const changed=await zip.file('ppt/charts/dsl-1-11.xml')!.async('string');
+ assert.doesNotMatch(changed, /<c:(majorUnit|minorUnit)\b/);
+ assert.match(changed, /<c:v>940<\/c:v>/);
+ assert.equal(await zip.file('ppt/charts/chart1.xml')!.async('string'),original);
+ assert.equal(changed.match(/<c:scaling>[\s\S]*?<\/c:scaling>/)?.[0],original.match(/<c:scaling>[\s\S]*?<\/c:scaling>/)?.[0]);
+});
+test('pie charts compile and reject negative or zero shares', async () => {
+ const {zip,node}=await fixture();
+ zip.file('ppt/charts/chart1.xml', chartXml.replaceAll('barChart','pieChart'));
+ const contract=await inspectDataComponent(zip,'ppt/slides/slide1.xml',node,'chart');
+ assert.equal(contract.chart!.type,'pie');
+ const c: ComponentManifest={key:'chart_1',kind:'chart',ordinal:1,rawDsl:'@图表',sampleContent:'',locator:{shapeId:'11',shapeName:'@图表',nodeType:'graphicFrame',path:[0]},...contract};
+ assert.deepEqual(validateDataValue(c,{categories:['A','B'],series:[{name:'Share',values:[20,80]}]}),[]);
+ for(const values of [[-1,2],[0,0]]) assert.ok(validateDataValue(c,{categories:['A','B'],series:[{name:'Share',values}]}).length);
 });

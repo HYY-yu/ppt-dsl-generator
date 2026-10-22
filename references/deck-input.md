@@ -109,3 +109,7 @@ npm run validate-input -- --manifest "$MANIFEST" --input "$DECK_INPUT"
 ## 原生数据补充
 
 `@表格` / `@图表` 的精确语法、容量与 JSON 见 [原生数据组件](native-data-components.md)。`--content-only` 同样校验数据合同；最终 palette 由确定性流程绑定。调用方定向修复数据时使用 `set_data` 替换被报告的整个数据对象并重验，不能当文本处理。新模板/新组件验收见 [模板接入验收](template-integration-qa.md)。
+
+## 背景字段
+
+模板含 `background_n` 时，内容草稿必须省略且不能主动填写；最终输入必须由确定性流程绑定同一个本地 PNG/JPEG 路径。背景允许跨页复用，与普通图片的逐页候选合同分开；详见 [共享背景](shared-background.md)。

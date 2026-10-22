@@ -55,6 +55,17 @@ async function validateDeck(manifest: TemplateManifest, input: DeckInput, conten
       }
     }
   }
+  // A deck-wide background is generated once, never independently per slide.
+  const backgrounds = new Set<string>();
+  for (const slide of input.slides) {
+    for (const component of manifest.slides.find(t => t.templateId === slide.templateId)?.nodes ?? []) {
+      if (component.kind !== "background") continue;
+      const value = slide.nodes?.[component.key];
+      if (typeof value === "string") backgrounds.add(path.resolve(value));
+      else if (value && typeof value === "object" && "path" in value) backgrounds.add(path.resolve(value.path));
+    }
+  }
+  if (backgrounds.size > 1) errors.push("所有 @背景 必须绑定同一张背景图");
   validateDeckStructure(manifest, input, errors);
   validateDirectoryTransitionContract(manifest, input, errors, !contentOnly);
   return errors;
@@ -127,11 +138,11 @@ function validateDirectoryTransitionContract(manifest: TemplateManifest, input: 
 
 async function validateValue(component: ComponentManifest, value: NodeValue, label: string, errors: string[]): Promise<void> {
   if (component.kind === "table" || component.kind === "chart") { errors.push(...validateDataValue(component, value).map(e => `${label}: ${e}`)); return; }
-  if (component.kind === "image" || component.kind === "icon") {
+  if (component.kind === "image" || component.kind === "background" || component.kind === "icon") {
     const source = typeof value === "object" && value !== null && "path" in value ? value.path : String(value);
     if (!source) { errors.push(`${label} 资源路径为空`); return; }
     const extension = path.extname(source).toLowerCase();
-    const supported = component.kind === "icon" ? [".svg", ".png"] : [".svg", ".png", ".jpg", ".jpeg", ".gif"];
+    const supported = component.kind === "background" ? [".png", ".jpg", ".jpeg"] : component.kind === "icon" ? [".svg", ".png"] : [".svg", ".png", ".jpg", ".jpeg", ".gif"];
     if (!supported.includes(extension)) errors.push(`${label} 不支持资源格式: ${extension || "(无扩展名)"}`);
     try { await access(source); } catch { errors.push(`${label} 资源不存在: ${source}`); }
     return;

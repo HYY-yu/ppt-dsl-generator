@@ -41,11 +41,18 @@ export async function generateDeck(options: { templatePath: string; manifest: Te
   let presentation = automizer.loadRoot(templateBuffer).load(templateBuffer, TEMPLATE_LABEL);
   for (const inputSlide of input.slides) {
     const template = getSlide(options.manifest, inputSlide.templateId);
-    presentation = presentation.addSlide(TEMPLATE_LABEL, template.slideNumber, (slide: ISlide) => { void slide; });
+    presentation = presentation.addSlide(TEMPLATE_LABEL, sourceSlidePartNumber(template), (slide: ISlide) => { void slide; });
   }
   const summary = await presentation.write(path.basename(options.outPath));
   await patchGeneratedDeck(options.outPath, options.manifest, input);
   console.info(`[generate] status=${summary.status} outputSlides=${input.slides.length} automizerParts=${summary.slides}`);
+}
+
+// Automizer numeric identifiers address slideN.xml, not presentation display order.
+export function sourceSlidePartNumber(slide: Pick<SlideManifest, "slidePath">): number {
+  const match = /^ppt\/slides\/slide([1-9]\d*)\.xml$/.exec(slide.slidePath);
+  if (!match) throw new Error(`Unsupported slide part path: ${slide.slidePath}`);
+  return Number(match[1]);
 }
 
 async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, input: DeckInput): Promise<void> {
@@ -55,6 +62,8 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
     throw new Error(`输出页数 ${slidePaths.length} 与 DeckInput 页数 ${input.slides.length} 不一致`);
   }
   let mediaCounter = 0;
+  let sharedBackground: Awaited<ReturnType<typeof addRasterMedia>> | undefined;
+  let backgroundBindings = 0;
   for (let slideIndex = 0; slideIndex < input.slides.length; slideIndex += 1) {
     const inputSlide = input.slides[slideIndex];
     const templateSlide = getSlide(manifest, inputSlide.templateId);
@@ -65,7 +74,17 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
     for (const component of templateSlide.nodes) {
       const value = inputSlide.nodes?.[component.key];
       if (value === undefined) continue;
-      xml = await patchComponent(zip, slidePath, xml, component.locator.shapeId, component, value, () => ++mediaCounter);
+      if (component.kind === "background") {
+        const sourcePath = typeof value === "object" && "path" in value ? value.path : String(value);
+        sharedBackground ??= await addRasterMedia(zip, sourcePath, ++mediaCounter);
+        const node = flattenNodes(parseSlideNodes(xml)).find(n => n.id === component.locator.shapeId);
+        if (!node || node.type !== "pic") throw new Error(`${slidePath}: @背景 目标图片不存在`);
+        const relId = await addImageRelationship(zip, slidePath, sharedBackground.name);
+        xml = replaceNodeRaw(xml, node, centerCropRasterPictureXml(removeNativeSvgFromPictureXml(node.raw, relId), sharedBackground.width, sharedBackground.height, node.box));
+        backgroundBindings++;
+      } else {
+        xml = await patchComponent(zip, slidePath, xml, component.locator.shapeId, component, value, () => ++mediaCounter);
+      }
     }
     for (const list of templateSlide.lists) {
       const items = inputSlide.lists?.[list.key] ?? [];
@@ -79,6 +98,7 @@ async function patchGeneratedDeck(outPath: string, manifest: TemplateManifest, i
     xml = cleanDslNames(xml);
     zip.file(slidePath, xml);
   }
+  if (backgroundBindings) console.info(JSON.stringify({ event: "pptx_background_bound", images: 1, bindings: backgroundBindings }));
   if (input.palette) await applyPalette(zip, input.palette);
   const removedUnreferencedSlideParts = await removeUnreferencedSlideParts(zip, slidePaths);
   const removedUnreferencedImageRelationships = await removeUnreferencedSlideImageRelationships(zip);
@@ -802,3 +822,6 @@ function getSlide(manifest: TemplateManifest, id: string): SlideManifest {
 
 function escapeRegExp(value: string): string { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
 function escapeXml(value: string): string { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"); }
+
+// Compatibility export for existing runtime consumers.
+export const formatNumber = formatDeterministicNumber;

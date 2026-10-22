@@ -1,5 +1,5 @@
 export type PageType = "封面页" | "目录页" | "章节过渡页" | "内容页" | "结尾页";
-export type ComponentKind = "text" | "image" | "icon" | "number" | "table" | "chart";
+export type ComponentKind = "text" | "image" | "background" | "icon" | "number" | "table" | "chart";
 
 export interface LengthRange { min: number; max: number; fixed: boolean }
 export interface Box { x: number; y: number; cx: number; cy: number }
@@ -87,7 +87,7 @@ export interface AssetPathValue { path: string }
 
 export type TextValue = string | RichTextValue;
 export interface TableContract { columns: number; minRows: number; maxRows: number; maxTextLength: number }
-export interface ChartContract { type: "bar" | "line" | "doughnut"; series: number; minCategories: number; maxCategories: number; maxTextLength: number }
+export interface ChartContract { type: "bar" | "line" | "doughnut" | "pie"; series: number; minCategories: number; maxCategories: number; maxTextLength: number }
 export interface TableValue { headers: string[]; rows: string[][] }
 export interface ChartValue { categories: string[]; series: Array<{ name: string; values: number[] }> }
 export interface Palette { primary: string; onPrimary: string; secondary: string; background: string; surface: string; text: string; mutedText: string; border: string; chart: string[] }

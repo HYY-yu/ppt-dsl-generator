@@ -1,5 +1,5 @@
 import JSZip from "jszip";
-import type { ComponentManifest, TableValue, ChartValue, Palette } from "../types.js";
+import type { ComponentManifest, ChartContract, TableValue, ChartValue, Palette } from "../types.js";
 import { parseRelationships, relationshipPartForOwner, resolveRelationshipTarget } from "./relationships.js";
 import { readZipText } from "./read.js";
 import { replaceNodeRaw, type XmlNode } from "./nodes.js";
@@ -35,20 +35,20 @@ export async function inspectDataComponent(zip: JSZip, slidePath: string, node: 
   const chartPath = await linkedPart(zip, slidePath, id);
   const xml = await readZipText(zip, chartPath);
   const types = [...xml.matchAll(/<c:(\w+)Chart\b/g)].map(m => m[1]);
-  if (types.length !== 1 || !["bar", "line", "doughnut"].includes(types[0])) throw new Error(`暂不支持图表类型 ${types.join(",")}`);
+  if (types.length !== 1 || !["bar", "line", "doughnut", "pie"].includes(types[0])) throw new Error(`暂不支持图表类型 ${types.join(",")}`);
   const series = matches(xml, /<c:ser\b[\s\S]*?<\/c:ser>/g);
   const counts = series.map(s => Number(s.match(/<c:cat>[\s\S]*?<c:ptCount val="(\d+)"/)?.[1]));
   if (!series.length || counts.some(v => !v || v !== counts[0])) throw new Error("图表分类缓存不完整或系列分类不一致");
   const external = xml.match(/<c:externalData\b[^>]*r:id="([^"]+)"/)?.[1];
   if (!external) throw new Error("图表必须包含可编辑的内嵌工作簿");
   await linkedPart(zip, chartPath, external);
-  return { chart: { type: types[0] as "bar" | "line" | "doughnut", series: series.length, minCategories: 1, maxCategories: counts[0], maxTextLength: 24 } };
+  return { chart: { type: types[0] as ChartContract["type"], series: series.length, minCategories: 1, maxCategories: counts[0], maxTextLength: 24 } };
 }
 export function dataValueSchema(c: ComponentManifest): Record<string, unknown> {
   const limit = c.table?.maxTextLength ?? c.chart?.maxTextLength ?? 24;
   const text = { type: "string", minLength: 1, maxLength: limit };
   if (c.kind === "table" && c.table) return object({ headers: array(text, c.table.columns, c.table.columns), rows: array(array(text, c.table.columns, c.table.columns), c.table.minRows, c.table.maxRows) });
-  if (c.kind === "chart" && c.chart) return object({ categories: array(text, c.chart.minCategories, c.chart.maxCategories), series: array(object({ name: text, values: array({ type: "number", ...(c.chart.type === "doughnut" ? { minimum: 0 } : {}) }, c.chart.minCategories, c.chart.maxCategories) }), c.chart.series, c.chart.series) });
+  if (c.kind === "chart" && c.chart) return object({ categories: array(text, c.chart.minCategories, c.chart.maxCategories), series: array(object({ name: text, values: array({ type: "number", ...((c.chart.type === "doughnut" || c.chart.type === "pie") ? { minimum: 0 } : {}) }, c.chart.minCategories, c.chart.maxCategories) }), c.chart.series, c.chart.series) });
   throw new Error(`${c.key} 缺少数据合同`);
 }
 export function validateDataValue(c: ComponentManifest, value: unknown): string[] {
@@ -65,9 +65,10 @@ export function validateDataValue(c: ComponentManifest, value: unknown): string[
   } else {
     const t = c.chart;
     if (!t) return ["缺少 chart 合同"];
+    const partOfWhole = t.type === "doughnut" || t.type === "pie";
     if (Object.keys(v).some(k => !["categories", "series"].includes(k))) errors.push("图表存在额外字段");
     if (!Array.isArray(v.categories) || v.categories.length < t.minCategories || v.categories.length > t.maxCategories || !v.categories.every(validText) || new Set(v.categories).size !== v.categories.length) errors.push(`分类必须是 ${t.minCategories}-${t.maxCategories} 个不重复有效短文本`);
-    if (!Array.isArray(v.series) || v.series.length !== t.series || v.series.some(s => !s || Object.keys(s).some(k => !["name", "values"].includes(k)) || !validText(s.name) || !Array.isArray(s.values) || s.values.length !== v.categories?.length || s.values.some(n => typeof n !== "number" || !Number.isFinite(n) || (t.type === "doughnut" && n < 0)) || (t.type === "doughnut" && s.values.every(n => n === 0)))) errors.push(`必须包含 ${t.series} 个系列，数值长度与分类一致；圆环值非负且总和大于零`);
+    if (!Array.isArray(v.series) || v.series.length !== t.series || v.series.some(s => !s || Object.keys(s).some(k => !["name", "values"].includes(k)) || !validText(s.name) || !Array.isArray(s.values) || s.values.length !== v.categories?.length || s.values.some(n => typeof n !== "number" || !Number.isFinite(n) || (partOfWhole && n < 0)) || (partOfWhole && s.values.every(n => n === 0)))) errors.push(`必须包含 ${t.series} 个系列，数值长度与分类一致；饼图和圆环图数值非负且总和大于零`);
   }
   return errors;
 }
@@ -106,6 +107,11 @@ export async function patchDataComponent(zip: JSZip, slidePath: string, xml: str
   const unique = `${slidePath.match(/slide(\d+)\.xml/)?.[1]}-${node.id}`;
   const chartPath = `ppt/charts/dsl-${unique}.xml`;
   let chart = await readZipText(zip, oldPath);
+  // A template's sample-data tick interval can produce hundreds of overlapping
+  // labels for a new data range. Let Office choose intervals for replaced data;
+  // retain axis bounds, orientation, styling, and every unmarked chart.
+  chart = chart.replace(/<c:valAx\b[^>]*>[\s\S]*?<\/c:valAx>/g, axis =>
+    axis.replace(/<c:(majorUnit|minorUnit)\b[^>]*(?:\/\s*>|>[\s\S]*?<\/c:\1>)/g, ""));
   let rels = await readZipText(zip, relationshipPartForOwner(oldPath));
   const externalId = chart.match(/<c:externalData\b[^>]*r:id="([^"]+)"/)?.[1];
   if (!externalId) throw new Error("输出图表缺少内嵌工作簿");
@@ -151,6 +157,56 @@ export async function patchDataComponent(zip: JSZip, slidePath: string, xml: str
   return xml;
 }
 
+// Restrict edits to direct children: labels and marker/point styles also contain spPr.
+function children(xml: string): { tag: string; start: number; end: number; raw: string }[] {
+  const result: { tag: string; start: number; end: number; raw: string }[] = [];
+  let depth = 0, start = 0, tag = "";
+  for (const m of xml.matchAll(/<(\/?)([\w:]+)\b[^>]*>/g)) {
+    const closing = m[1] === "/", selfClosing = m[0].endsWith("/>");
+    if (!closing) {
+      if (depth === 1) { start = m.index!; tag = m[2]; }
+      if (!selfClosing) depth++;
+    } else depth--;
+    if ((closing && depth === 1) || (selfClosing && depth === 1)) {
+      const end = m.index! + m[0].length;
+      result.push({ tag, start, end, raw: xml.slice(start, end) });
+    }
+  }
+  return result;
+}
+
+function chartShapeColor(owner: string, color: string, line: boolean): string {
+  const fill = `<a:solidFill><a:srgbClr val="${color}"/></a:solidFill>`;
+  const setFill = (xml: string): string => {
+    const existing = children(xml).find(c => /^a:(solidFill|gradFill|pattFill|blipFill|grpFill|noFill)$/.test(c.tag));
+    if (existing) return xml.slice(0, existing.start) + fill + xml.slice(existing.end);
+    if (xml.endsWith("/>")) return xml.slice(0, -2) + `>${fill}</${xml.match(/^<([\w:]+)/)![1]}>`;
+    const before = children(xml).find(c => /^(a:ln|a:effectLst|a:effectDag|a:scene3d|a:sp3d|a:extLst|a:prstDash|a:custDash|a:round|a:bevel|a:miter|a:headEnd|a:tailEnd)$/.test(c.tag));
+    const pos = before?.start ?? xml.lastIndexOf("</");
+    return xml.slice(0, pos) + fill + xml.slice(pos);
+  };
+  const sp = children(owner).find(c => c.tag === "c:spPr");
+  let style = sp?.raw ?? "<c:spPr></c:spPr>";
+  if (style.endsWith("/>")) style = "<c:spPr></c:spPr>";
+  if (line) {
+    const ln = children(style).find(c => c.tag === "a:ln");
+    if (ln) style = style.slice(0, ln.start) + setFill(ln.raw) + style.slice(ln.end);
+    else {
+      const pos = children(style).find(c => /^a:(effectLst|effectDag|scene3d|sp3d|extLst)$/.test(c.tag))?.start ?? style.lastIndexOf("</");
+      style = style.slice(0, pos) + `<a:ln>${fill}</a:ln>` + style.slice(pos);
+    }
+  } else style = setFill(style);
+  if (sp) return owner.slice(0, sp.start) + style + owner.slice(sp.end);
+  // CT_*Ser: spPr follows tx/order; CT_DPt: follows idx/invert/bubble/explosion;
+  // CT_Marker: follows symbol/size. Always precede subsequent schema children.
+  const preceding = owner.startsWith("<c:ser") ? ["c:idx", "c:order", "c:tx"]
+    : owner.startsWith("<c:marker") ? ["c:symbol", "c:size"]
+    : ["c:idx", "c:invertIfNegative", "c:marker", "c:bubble3D", "c:explosion"];
+  const before = children(owner).find(c => !preceding.includes(c.tag));
+  const pos = before?.start ?? owner.lastIndexOf("</");
+  return owner.slice(0, pos) + style + owner.slice(pos);
+}
+
 export async function applyPalette(zip: JSZip, p: Palette): Promise<void> {
   const errors = validatePalette(p);
   if (errors.length) throw new Error(errors.join("; "));
@@ -168,21 +224,32 @@ export async function applyPalette(zip: JSZip, p: Palette): Promise<void> {
   }
   for (const name of Object.keys(zip.files).filter(n => /^ppt\/charts\/.*\.xml$/.test(n) && !n.includes("_rels"))) {
     let xml = await readZipText(zip, name);
-    let seriesIndex = 0;
-    const doughnut = xml.includes("<c:doughnutChart");
-    xml = xml.replace(/<c:ser\b[\s\S]*?<\/c:ser>/g, s => {
-      const col = hex(p.chart[seriesIndex++ % p.chart.length]);
-      const pointParts: string[] = [];
-      s = s.replace(/<c:dPt>[\s\S]*?<\/c:dPt>/g, point => { const index = pointParts.length; pointParts.push(point); return `__POINT_${index}__`; });
-      s = s.replace(/<a:srgbClr val="[A-Fa-f\d]{6}"/g, `<a:srgbClr val="${col}"`);
-      s = s.replace(/__POINT_(\d+)__/g, (_, i) => { const point = pointParts[Number(i)]; const idx = Number(point.match(/<c:idx val="(\d+)"/)?.[1] ?? i); return point.replace(/<a:(?:srgbClr|schemeClr) val="[^"]+"\s*\/>/g, `<a:srgbClr val="${hex(p.chart[idx % p.chart.length])}"/>`); });
-      if (doughnut && !pointParts.length) {
-        const count = Number(s.match(/<c:cat>[\s\S]*?<c:ptCount val="(\d+)"/)?.[1] ?? 0);
-        s = s.replace(/<c:cat>/, Array.from({ length: count }, (_, i) => `<c:dPt><c:idx val="${i}"/><c:spPr><a:solidFill><a:srgbClr val="${hex(p.chart[i % p.chart.length])}"/></a:solidFill></c:spPr></c:dPt>`).join("") + "<c:cat>");
-      }
-      return s;
-    });
     xml = xml.replace(/<a:srgbClr val="(?:666666|D4D4D4)"/g, m => `<a:srgbClr val="${hex(m.includes("666666") ? p.mutedText : p.border)}"`);
+    let seriesIndex = 0;
+    const partOfWhole = /<c:(?:doughnut|pie)Chart\b/.test(xml);
+    const line = /<c:lineChart\b/.test(xml);
+    xml = xml.replace(/<c:ser\b[\s\S]*?<\/c:ser>/g, series => {
+      const col = hex(p.chart[seriesIndex++ % p.chart.length]);
+      let s = chartShapeColor(series, col, line);
+      s = s.replace(/<c:marker\b[^>]*>[\s\S]*?<\/c:marker>/g, marker => chartShapeColor(chartShapeColor(marker, col, false), col, true));
+      const points = new Map<number, string>();
+      s = s.replace(/<c:dPt\b[^>]*>[\s\S]*?<\/c:dPt>/g, point => {
+        const idx = Number(point.match(/<c:idx val="(\d+)"/)?.[1] ?? 0);
+        points.set(idx, point);
+        return "";
+      });
+      const count = Number(s.match(/<c:cat>[\s\S]*?<c:ptCount val="(\d+)"/)?.[1] ?? 0);
+      if (partOfWhole) for (let i = 0; i < count; i++) {
+        if (!points.has(i)) points.set(i, `<c:dPt><c:idx val="${i}"/></c:dPt>`);
+      }
+      const pointXml = [...points].sort(([a], [b]) => a - b).map(([idx, point]) => {
+        const color = partOfWhole ? hex(p.chart[idx % p.chart.length]) : col;
+        return chartShapeColor(point, color, line);
+      }).join("");
+      const before = children(s).find(c => ["c:dLbls", "c:trendline", "c:errBars", "c:cat", "c:val", "c:smooth", "c:extLst"].includes(c.tag));
+      const pos = before?.start ?? s.lastIndexOf("</");
+      return s.slice(0, pos) + pointXml + s.slice(pos);
+    });
     zip.file(name, xml);
   }
   console.info(`[generate:palette] primary=${p.primary} chartColors=${p.chart.length}`);

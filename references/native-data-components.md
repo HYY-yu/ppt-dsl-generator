@@ -9,7 +9,7 @@
 - 编译器必须枚举 `p:graphicFrame`，不能只遍历 `p:sp/p:pic/p:grpSp`。编译后按出现顺序得到 `table_1`、`chart_1` 等 key，定位仍使用 shapeId。
 - 数据组件仅支持页面级节点；不能放入 Group Item、固定列表或嵌套组合。遇到不支持的标记/结构必须报错，不能静默漏编译。
 - 表格至少有一行表头和一行数据，不支持合并单元格。列数固定；`minRows=1`，`maxRows=模板行数-1`，行数不包含表头。
-- 图表当前支持单一 `bar`（柱/条）、`line`（折线）、`doughnut`（圆环）；不支持组合图、饼图、散点图等其他类型。系列数固定；分类数从 1 到模板缓存分类数。各系列分类容量必须一致。
+- 图表当前支持单一 `bar`（柱/条）、`line`（折线）、`doughnut`（圆环）、`pie`（饼图）；不支持组合图、散点图等其他类型。系列数固定；分类数从 1 到模板缓存分类数。各系列分类容量必须一致。
 - 图表必须关联内部可编辑 XLSX 工作簿；只有缓存或外部 Excel 链接不能通过编译检查。常规单数据工作表模板是本版本支持的准备方式，复杂工作簿应在模板准备阶段简化并独立验收。
 - 当前编译器的单元格、分类和系列名称 `maxTextLength` 默认 24 个 Unicode 码点；这不是所有设计的视觉保证。实际输入始终读取 Manifest；更窄的模板应调整合同并重新验收。
 
@@ -51,8 +51,8 @@ Manifest 示例（省略 locator 等运行时必需字段，仅解释容量）�
 ```
 
 - 写入 `slides[i].nodes`，key 必须来自所选页面 Manifest。表格 `headers` 和每一 `rows` 的列数相同；图表每个系列 `values.length === categories.length`。
-- 只允许规定字段；所有标签非空、无不可见格式字符，分类不能重复。图表数值是有限 JSON number，禁止数字字符串、NaN 和 Infinity；圆环值非负，每个系列至少一个正数。
-- Schema 约束静态上下限，runtime 继续检查数组间长度一致、重复分类和圆环非零等关系约束，不能只依赖 provider 的 structured output。
+- 只允许规定字段；所有标签非空、无不可见格式字符，分类不能重复。图表数值是有限 JSON number，禁止数字字符串、NaN 和 Infinity；饼图和圆环值非负，每个系列至少一个正数。
+- Schema 约束静态上下限，runtime 继续检查数组间长度一致、重复分类和饼图/圆环非零等关系约束，不能只依赖 provider 的 structured output。
 - 先判断资料是否有真实数据及图表/趋势/占比/表格表达需求，再选择数据版式；不得为了使用模板而编造数字、单位、精度、分母或统计范围。没有匹配数据时选择其他页面，或明确请求必要资料。
 - 用标题、轴标题或邻近说明让单位可见；系列名可能因模板隐藏图例而不显示。保留来源引用，不把模板示例值当资料。
 - 业务系统若使用 `tables:[{key,value}]` / `charts:[{key,value}]` 作为中间结构，应明确适配为上面的直接节点对象。此数组结构不是通用 DeckInput 协议。
@@ -68,6 +68,8 @@ Manifest 示例（省略 locator 等运行时必需字段，仅解释容量）�
 2. `c:f` 范围公式，以及 XLSX 对应工作表内容和 dimension。
 3. 相关表格/筛选范围（如存在），并移除缩短分类后的多余 `c:dPt`。
 4. 新 part 的 relationships 与 content types。
+
+替换图表数据后移除数值轴的固定 `majorUnit/minorUnit`，让 Office 根据新数值自动计算刻度间隔；保留轴上下限、方向与样式。未标记图表不受此项数据替换影响。
 
 “图表能显示”不等于“数据可编辑”；验收必须区分缓存、公式和工作簿。复杂数据标签、工作簿表结构或特殊图表扩展不能仅凭基础测试宣称支持，应另做样例与原生验证。
 
@@ -89,7 +91,7 @@ Manifest 示例（省略 locator 等运行时必需字段，仅解释容量）�
 }
 ```
 
-所有颜色均为 `#RRGGBB`；`chart` 为 3–12 色。Office theme 映射：`dk1=text`、`lt1=background`、`dk2=mutedText`、`lt2=surface`、`accent1=primary`、`accent2=secondary`、`accent3=border`、`accent4..6=chart[0..2]`；超链接使用 primary/secondary。原生图表系列使用 chart 色，圆环按分类着色。
+所有颜色均为 `#RRGGBB`；`chart` 为 3–12 色。Office theme 映射：`dk1=text`、`lt1=background`、`dk2=mutedText`、`lt2=surface`、`accent1=primary`、`accent2=secondary`、`accent3=border`、`accent4..6=chart[0..2]`；超链接使用 primary/secondary。柱状/折线按系列顺序使用 chart 色，饼图/圆环按分类着色；超出色板长度时循环使用。无论模板使用 RGB、主题色或未声明颜色，生成器都补齐数据图形的颜色，折线标记与系列同步，保留标签、边框与数据。
 
 这是显式主题化模板的合同：只有模板将 `lt1` 文字约定为反色文字时，才使用当前 runtime 将其转换为 `onPrimary` 的规则。背景可能带浅色，反色文字不能错误继承 background。源模板硬编码色应在获得模板适配授权后，于准备副本中按语义映射到 theme token；不要用全局颜色替换误伤品牌标志、照片或资料资产。旁置手绘图例也要使用与图表一致的 chart 色，而不是 border。
 
