@@ -1,5 +1,5 @@
 import type JSZip from "jszip";
-import { maybeReadZipText, readZipText } from "./read.js";
+import { maybeReadZipText, readZipText } from "./zip.js";
 import {
   ownerPartForRelationshipPart,
   parsePresentationSlideRelIds,

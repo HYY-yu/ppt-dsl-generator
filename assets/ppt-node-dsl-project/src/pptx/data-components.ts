@@ -1,7 +1,7 @@
 import JSZip from "jszip";
 import type { ComponentManifest, ChartContract, TableValue, ChartValue, Palette } from "../types.js";
 import { parseRelationships, relationshipPartForOwner, resolveRelationshipTarget } from "./relationships.js";
-import { readZipText } from "./read.js";
+import { readZipText } from "./zip.js";
 import { replaceNodeRaw, type XmlNode } from "./nodes.js";
 
 const esc = (v: string | number) => String(v).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");

@@ -1,27 +1,19 @@
-import { copyFile, mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { Command } from "commander";
-import { analyzeTemplate } from "./pptx/analyze.js";
-import { readPptx } from "./pptx/read.js";
-import { buildDeckContentSchema, buildInputSchema } from "./schema.js";
-import { attachTemplateFingerprint } from "./template-contract.js";
-import { lintTemplate } from "./lint.js";
+import { Command, InvalidArgumentError } from "commander";
+import { compileTemplate } from "./compile.js";
+import type { AnalyzeTemplateOptions } from "./pptx/analyze.js";
 
-const program = new Command().requiredOption("--template <path>").option("--out <dir>", "输出目录", "compiled-template");
+const program = new Command()
+  .requiredOption("--template <path>")
+  .option("--out <dir>", "输出目录", "compiled-template")
+  .option("--notes-shape-name <name>", "优先从指定名称的备注对象读取页面合同")
+  .option("--max-same-kind-components <count>", "同一列表项内同类组件的上限", (raw: string) => {
+    const count = Number(raw);
+    if (!/^\d+$/.test(raw) || !Number.isSafeInteger(count) || count < 1) {
+      throw new InvalidArgumentError("请输入正整数");
+    }
+    return count;
+  });
 program.parse();
-const options = program.opts<{ template: string; out: string }>();
-const templatePath = path.resolve(options.template);
-const outDir = path.resolve(options.out);
-await mkdir(outDir, { recursive: true });
-console.info(`[compile] template=${templatePath}`);
-const manifest = await attachTemplateFingerprint(await analyzeTemplate(await readPptx(templatePath), templatePath), templatePath);
-const lint = lintTemplate(manifest);
-await writeFile(path.join(outDir, "template-lint.json"), `${JSON.stringify(lint, null, 2)}\n`);
-if (lint.errors.length) throw new Error(`模板节点 DSL 检查失败:\n${lint.errors.map((error) => `- ${error}`).join("\n")}`);
-await writeFile(path.join(outDir, "template-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
-await writeFile(path.join(outDir, "input.schema.json"), `${JSON.stringify(buildInputSchema(manifest), null, 2)}\n`);
-await writeFile(path.join(outDir, "deck-content.schema.json"), `${JSON.stringify(buildDeckContentSchema(manifest), null, 2)}\n`);
-await writeFile(path.join(outDir, "template.lock.json"), `${JSON.stringify({ manifestVersion: manifest.manifestVersion, templateSha256: manifest.templateSha256 }, null, 2)}\n`);
-await copyFile(templatePath, path.join(outDir, "template.pptx"));
-const nodeCount = manifest.slides.reduce((sum, slide) => sum + slide.nodes.length + slide.lists.flatMap((list) => list.items.flatMap((item) => item.components)).length, 0);
-console.info(`[compile] slides=${manifest.slideCount} nodes=${nodeCount} errors=${lint.errors.length} warnings=${lint.warnings.length}`);
+const { template, out, ...options } = program.opts<AnalyzeTemplateOptions & { template: string; out: string }>();
+await compileTemplate(path.resolve(template), path.resolve(out), options);
