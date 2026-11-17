@@ -60,6 +60,7 @@ mkdir -p "$seed/packages/ppt-dsl"
 printf 'previous provenance\n' > "$seed/packages/ppt-dsl/PROVENANCE.md"
 printf 'obsolete\n' > "$seed/packages/ppt-dsl/obsolete.ts"
 printf 'consumer skill\n' > "$seed/SKILL.md"
+printf 'node_modules/\n' > "$seed/.gitignore"
 commit "$seed" base
 git clone -q --bare "$seed" "$remote"
 
@@ -74,7 +75,14 @@ prepare() {
 }
 
 fresh "$tmp/first"
+ignored='packages/ppt-dsl/node_modules/sentinel'
+mkdir -p "$tmp/first/${ignored%/*}"
+printf 'preinstalled dependency\n' > "$tmp/first/$ignored"
+[[ -z $(git -C "$tmp/first" status --porcelain --untracked-files=all) ]]
 prepare "$tmp/first"
+[[ $(cat "$tmp/first/$ignored") == 'preinstalled dependency' ]]
+git -C "$tmp/first" diff --quiet HEAD^ HEAD -- packages/ppt-dsl/node_modules
+[[ -z $(git -C "$tmp/first" ls-tree -r HEAD -- packages/ppt-dsl/node_modules) ]]
 git -C "$tmp/first" diff --quiet HEAD^ HEAD -- . ':(exclude)packages/ppt-dsl'
 test ! -e "$tmp/first/packages/ppt-dsl/obsolete.ts"
 cmp "$upstream/$runtime/src/new.ts" "$tmp/first/packages/ppt-dsl/src/new.ts"

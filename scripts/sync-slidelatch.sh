@@ -53,7 +53,13 @@ prepare() {
 Submit shared runtime changes and regression tests to upstream first. The release workflow refreshes this snapshot from the published commit and opens a SlideLatch upgrade PR for review. SlideLatch's named page contract and release review live in \`lib/workflow\`. Maintain both Skills independently in their own repositories.
 MARKDOWN
 
-  git -C "$consumer" add -f -- "$snapshot"
+  {
+    git -C "$upstream" ls-tree -r --name-only -z "$sha:$source_runtime" |
+      while IFS= read -r -d '' path; do
+        printf '%s\0' "$snapshot/$path"
+      done
+    printf '%s\0' "$snapshot/LICENSE" "$snapshot/fixtures/seed-template/ppt_example.pptx" "$snapshot/PROVENANCE.md"
+  } | git -C "$consumer" --literal-pathspecs add -f --pathspec-from-file=- --pathspec-file-nul
   git -C "$consumer" -c user.name='PPT-DSL Release Sync' \
     -c user.email='41898282+github-actions[bot]@users.noreply.github.com' -c core.hooksPath=/dev/null \
     commit -m "chore: sync PPT-DSL release ${sha:0:12}"
