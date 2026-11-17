@@ -246,3 +246,13 @@ test("package QA rejects media parts that no relationship references", async () 
   assert.deepEqual(result.unreferencedMediaParts, ["ppt/media/orphan.png"]);
   assert.match(result.errors.join("\n"), /unreferenced media parts: 1/);
 });
+
+for (const part of ["ppt/presentation.xml", "ppt/_rels/presentation.xml.rels"]) {
+  test(`package inspection rejects duplicate DOCTYPE in ${part}`, async () => {
+    const zip = buildPackage();
+    const xml = (await zip.file(part)!.async("string")).replace(/<\?xml[^?]*\?>/, "");
+    zip.file(part, "<!DOCTYPE root><!DOCTYPE root>" + xml);
+    await assert.rejects(inspectPptxPackage(zip), /DOCTYPE/i);
+    assert.equal((await inspectPptxPackage(buildPackage())).slideCount, 1);
+  });
+}

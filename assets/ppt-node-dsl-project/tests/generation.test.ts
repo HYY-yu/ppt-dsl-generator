@@ -4,6 +4,8 @@ import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { compileTemplate } from "../src/compile.js";
+import { validateDeckInput } from "../src/validation.js";
 import { analyzeTemplate } from "../src/pptx/analyze.js";
 import { attachTemplateFingerprint } from "../src/template-contract.js";
 import { generateDeck } from "../src/pptx/generate.js";
@@ -107,9 +109,27 @@ test("generates reordered template pages with shared background, native SVG, ric
       for (const n of contract.nodes) if (n.kind === "background" || n.kind === "icon") delete slide.nodes?.[n.key];
     }
     assert.deepEqual(await validateDeckContent(manifest, draft), []);
+    const compiled = await compileTemplate(templatePath, path.join(dir, "compiled"));
+    assert.equal(compiled.templateSha256, manifest.templateSha256);
+    const invalid = structuredClone(input);
+    invalid.slides[0].templateId = "missing-template";
+    assert.ok((await validateDeckInput(manifest, invalid)).length);
     const outPath = path.join(dir, "deck.pptx");
     await generateDeck({ templatePath, manifest, input, outPath });
     const output = await readPptx(outPath);
+    const secondPath = path.join(dir, "deck-second.pptx");
+    await generateDeck({ templatePath, manifest, input, outPath: secondPath });
+    const second = await readPptx(secondPath);
+    const parts = Object.keys(output.files).filter(n => /^ppt\/slides\/.*\.xml$/.test(n)).sort();
+    assert.deepEqual(parts, Object.keys(second.files).filter(n => /^ppt\/slides\/.*\.xml$/.test(n)).sort());
+    // Automizer assigns fresh creation IDs. Compare user-visible content and fixed geometry.
+    const structure = (xml: string) => flattenNodes(parseSlideNodes(xml)).map(n => ({ id: n.id, name: n.name, box: n.box, text: [...n.raw.matchAll(/<a:t>([\s\S]*?)<\/a:t>/g)].map(m => m[1]) }));
+    for (const part of parts) {
+      if (!/\/slide\d+\.xml$/.test(part)) continue;
+      assert.deepEqual(structure(await output.file(part)!.async("string")), structure(await second.file(part)!.async("string")), part);
+    }
+    assert.equal((await verifyDeckPackage(second)).passed, true);
+
     const report = await verifyDeckPackage(output);
     assert.equal(report.passed, true, report.errors.join("; "));
     assert.equal(report.slides, input.slides.length);

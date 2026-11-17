@@ -1,0 +1,10 @@
+export { compileTemplate } from "./compile.js";
+export { selectCandidates } from "./select.js";
+export type { CandidateRequest } from "./select.js";
+export { generateDeck } from "./pptx/generate.js";
+export { validateDeckInput, validateDeckContent } from "./validation.js";
+export { bindDeterministicNumbers } from "./deck-numbers.js";
+export { verifyDeckPackage } from "./pptx/verify.js";
+export { readPptx } from "./pptx/read.js";
+export * from "./types.js";
+export type { AnalyzeTemplateOptions } from "./pptx/analyze.js";

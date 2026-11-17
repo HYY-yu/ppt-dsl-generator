@@ -92,6 +92,10 @@ npm run compile-template -- \
 - `template-lint.json`
 - `template.lock.json`
 
+程序可以从 `src/index.ts` 导入 `compileTemplate` 和 `selectCandidates`。CLI 的 `npm run select-template -- --manifest <manifest> --request <request>` 接受 Manifest 和选页请求 JSON，按合同筛选候选页。
+
+默认从整页备注读取页面合同。模板有专用备注对象时，可用 `--notes-shape-name <name>` 指定对象名称。未找到时回退到整页备注，同名对象重复时编译失败。调用方可用 `--max-same-kind-components <count>` 为列表项的同类组件匹配设置上限。
+
 先校验包含文案、页面级表格/图表数据与列表的内容草稿：
 
 ```bash
