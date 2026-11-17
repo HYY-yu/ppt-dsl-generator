@@ -236,3 +236,13 @@ npm test
 </div>
 
 共享背景合同见 [`references/shared-background.md`](references/shared-background.md)。背景与 palette 在内容草稿验证后由调用方绑定，不能由模型填写。
+
+## 同步发布版本到 SlideLatch
+
+在本仓库发布 GitHub Release 后，Actions 使用该发布事件的提交 SHA 更新 SlideLatch 的 `packages/ppt-dsl`，并为该 SHA 创建一个升级 PR。SlideLatch 的 Verify CI 随 PR 运行，合并由维护者决定。重跑相同 SHA 会复用已有 PR，已关闭的 PR 保持关闭。两个 Skill 仍在各自仓库维护。
+
+首次启用时，将专用 [fine-grained PAT](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token) 保存为本仓库的 Actions secret `SLIDELATCH_SYNC_TOKEN`。仅授权 `HYY-yu/SlideLatch`，权限为 **Contents: Read and write** 和 **Pull requests: Read and write**。凭据须来自能向 SlideLatch 推送分支的账号。GitHub 内置的 `GITHUB_TOKEN` 限于当前仓库，无法完成这一步。
+
+从包含同步工作流的提交发布版本。若工作流因凭据或网络失败，修复后在 Actions 重跑该发布任务。
+
+通过其他工作流发布时，请用能触发后续工作流的发布凭据。由默认 `GITHUB_TOKEN` 创建的 Release 不会触发此同步工作流。在 GitHub 界面发布也可以触发同步。

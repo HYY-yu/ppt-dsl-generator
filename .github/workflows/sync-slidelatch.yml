@@ -1,0 +1,46 @@
+name: Sync PPT-DSL release to SlideLatch
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-slidelatch-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  upgrade:
+    if: github.repository == 'HYY-yu/ppt-dsl-generator'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PPT_DSL_RELEASE_SHA: ${{ github.sha }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.sha }}
+          path: upstream
+          persist-credentials: false
+
+      - name: Check out SlideLatch main
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          repository: HYY-yu/SlideLatch
+          ref: main
+          fetch-depth: 0
+          path: consumer
+          persist-credentials: false
+
+      - name: Prepare the runtime snapshot
+        id: snapshot
+        run: bash upstream/scripts/sync-slidelatch.sh prepare upstream consumer "$PPT_DSL_RELEASE_SHA"
+
+      - name: Open the upgrade PR
+        if: steps.snapshot.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.SLIDELATCH_SYNC_TOKEN }}
+        run: bash upstream/scripts/sync-slidelatch.sh publish consumer "$PPT_DSL_RELEASE_SHA"
