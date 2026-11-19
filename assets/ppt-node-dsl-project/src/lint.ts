@@ -1,10 +1,9 @@
 import type { LintResult, TemplateManifest } from "./types.js";
 
-const REQUIRED_PAGE_TYPES = ["封面页", "目录页", "章节过渡页", "内容页", "结尾页"];
-
 export function lintTemplate(manifest: TemplateManifest): LintResult {
   const errors: string[] = [];
   const warnings: string[] = [];
+  if (!manifest.slides.length) errors.push("模板至少需要 1 页");
   for (const slide of manifest.slides) {
     for (const message of slide.warnings) (message.startsWith("ERROR:") ? errors : warnings).push(message.replace(/^ERROR:\s*/, ""));
     const editable = slide.nodes.length + slide.lists.reduce((sum, list) => sum + list.items.flatMap((item) => item.components).length, 0);
@@ -16,7 +15,6 @@ export function lintTemplate(manifest: TemplateManifest): LintResult {
       list.items.flatMap((item) => item.components).forEach((component) => validateComponent(slide.slideNumber, component, errors));
     }
   }
-  for (const type of REQUIRED_PAGE_TYPES) if (!manifest.slides.some((slide) => slide.pageType === type)) errors.push(`模板缺少页面类型: ${type}`);
   return { errors: [...new Set(errors)], warnings: [...new Set(warnings)] };
 }
 

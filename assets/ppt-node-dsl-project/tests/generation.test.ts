@@ -25,6 +25,62 @@ async function learningTemplate(): Promise<string> {
   }
 }
 
+test("compiles a content-only template and rejects it as a complete deck", async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), "ppt-dsl-content-template-"));
+  try {
+    const zip = await readPptx(await learningTemplate());
+    const source = await analyzeTemplate(zip, "fixture.pptx");
+    const content = source.slides.find(slide =>
+      slide.pageType === "内容页" && slide.lists.length === 0 &&
+      slide.nodes.length > 0 && slide.nodes.every(node => node.kind === "text"),
+    );
+    assert.ok(content?.relId);
+    const presentation = "ppt/presentation.xml";
+    const xml = await zip.file(presentation)!.async("string");
+    const slideList = xml.match(/<p:sldIdLst>[\s\S]*?<\/p:sldIdLst>/)?.[0];
+    assert.ok(slideList);
+    const slide = [...slideList.matchAll(/<p:sldId\b[^>]*\/>/g)]
+      .map(match => match[0])
+      .find(tag => tag.includes(`r:id="${content.relId}"`));
+    assert.ok(slide);
+    zip.file(presentation, xml.replace(slideList, `<p:sldIdLst>${slide}</p:sldIdLst>`));
+    const templatePath = path.join(dir, "content.pptx");
+    const sourceBytes = await zip.generateAsync({ type: "nodebuffer" });
+    await writeFile(templatePath, sourceBytes);
+
+    const compiledDir = path.join(dir, "compiled");
+    const manifest = await compileTemplate(templatePath, compiledDir);
+    assert.deepEqual(manifest.slides.map(page => page.pageType), ["内容页"]);
+    const compiledPath = path.join(compiledDir, "template.pptx");
+    assert.deepEqual(await readFile(compiledPath), sourceBytes);
+
+    const input: DeckInput = {
+      slides: [{
+        templateId: manifest.slides[0].templateId,
+        nodes: Object.fromEntries(content.nodes.map(node => [
+          node.key, "内".repeat(node.length?.min ?? 1),
+        ])),
+      }],
+    };
+    const outPath = path.join(dir, "complete.pptx");
+    await assert.rejects(generateDeck({ templatePath: compiledPath, manifest, input, outPath }), (error: unknown) => {
+      assert.ok(error instanceof Error);
+      for (const diagnostic of ["封面页", "目录页", "章节数量必须在 3-6", "结尾页"]) {
+        assert.ok(error.message.includes(diagnostic), error.message);
+      }
+      return true;
+    });
+    await assert.rejects(readFile(outPath), { code: "ENOENT" });
+
+    zip.file(presentation, xml.replace(slideList, "<p:sldIdLst/>"));
+    const emptyPath = path.join(dir, "empty.pptx");
+    await writeFile(emptyPath, await zip.generateAsync({ type: "nodebuffer" }));
+    await assert.rejects(compileTemplate(emptyPath, path.join(dir, "empty")), /模板至少需要 1 页/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("generates reordered template pages with shared background, native SVG, rich text and implicit numbers", async () => {
   const dir = await mkdtemp(path.join(tmpdir(), "ppt-dsl-generation-"));
   try {
